@@ -1,0 +1,56 @@
+#!/bin/bash
+# Disconnect one Bluetooth speaker on battery; reconnect it on AC power.
+set -euo pipefail
+
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/unplugged-speaker/config"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/unplugged-speaker"
+STATE_FILE="$STATE_DIR/last-power"
+BLUEUTIL="${BLUEUTIL:-/opt/homebrew/bin/blueutil}"
+
+if [ ! -r "$CONFIG_FILE" ]; then
+  echo "Missing config: $CONFIG_FILE" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+. "$CONFIG_FILE"
+: "${DEVICE_MAC:?DEVICE_MAC is required in $CONFIG_FILE}"
+
+if [ ! -x "$BLUEUTIL" ]; then
+  echo "blueutil not found at $BLUEUTIL. Install it with: brew install blueutil" >&2
+  exit 1
+fi
+
+mkdir -p "$STATE_DIR"
+
+power_source() {
+  /usr/bin/pmset -g ps | /usr/bin/head -n 1 | /usr/bin/sed -E "s/.*'([^']+)'.*/\\1/"
+}
+
+disconnect_speaker() {
+  "$BLUEUTIL" --disconnect "$DEVICE_MAC" >/dev/null 2>&1 || true
+}
+
+connect_speaker() {
+  for _ in 1 2 3; do
+    "$BLUEUTIL" --is-connected "$DEVICE_MAC" 2>/dev/null | /usr/bin/grep -q 1 && return 0
+    "$BLUEUTIL" --connect "$DEVICE_MAC" >/dev/null 2>&1 || true
+    /bin/sleep 5
+  done
+}
+
+last=""
+[ -f "$STATE_FILE" ] && last="$(/bin/cat "$STATE_FILE" 2>/dev/null || true)"
+
+while true; do
+  current="$(power_source)"
+  if [ "$current" != "$last" ]; then
+    case "$current" in
+      "Battery Power") disconnect_speaker ;;
+      "AC Power") connect_speaker ;;
+    esac
+    /usr/bin/printf '%s' "$current" > "$STATE_FILE"
+    last="$current"
+  fi
+  /bin/sleep 5
+done
