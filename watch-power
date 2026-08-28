@@ -5,7 +5,6 @@ set -euo pipefail
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/unplugged-speaker/config"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/unplugged-speaker"
 STATE_FILE="$STATE_DIR/last-power"
-BLUEUTIL="${BLUEUTIL:-/opt/homebrew/bin/blueutil}"
 
 if [ ! -r "$CONFIG_FILE" ]; then
   echo "Missing config: $CONFIG_FILE" >&2
@@ -16,8 +15,21 @@ fi
 . "$CONFIG_FILE"
 : "${DEVICE_MAC:?DEVICE_MAC is required in $CONFIG_FILE}"
 
-if [ ! -x "$BLUEUTIL" ]; then
-  echo "blueutil not found at $BLUEUTIL. Install it with: brew install blueutil" >&2
+if [ -z "${BLUEUTIL:-}" ]; then
+  for candidate in /opt/homebrew/bin/blueutil /usr/local/bin/blueutil; do
+    if [ -x "$candidate" ]; then
+      BLUEUTIL="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "${BLUEUTIL:-}" ]; then
+  BLUEUTIL="$(command -v blueutil 2>/dev/null || true)"
+fi
+
+if [ -z "$BLUEUTIL" ] || [ ! -x "$BLUEUTIL" ]; then
+  echo "blueutil not found. Re-run install.sh or set BLUEUTIL in $CONFIG_FILE" >&2
   exit 1
 fi
 
