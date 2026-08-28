@@ -16,10 +16,12 @@ LABEL="com.unplugged-speaker.watch-power"
 
 command -v brew >/dev/null || { echo "Homebrew is required: https://brew.sh" >&2; exit 1; }
 command -v blueutil >/dev/null || brew install blueutil
+BLUEUTIL_PATH="$(command -v blueutil)"
+[ -x "$BLUEUTIL_PATH" ] || { echo "blueutil was installed but is not executable" >&2; exit 1; }
 
-mkdir -p "$APP_DIR" "$CONFIG_DIR" "$HOME/Library/LaunchAgents"
+mkdir -p "$APP_DIR" "$CONFIG_DIR" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 install -m 755 "$REPO_DIR/watch-power" "$APP_DIR/watch-power"
-printf 'DEVICE_MAC=%q\n' "$DEVICE_MAC" > "$CONFIG_DIR/config"
+printf 'DEVICE_MAC=%q\nBLUEUTIL=%q\n' "$DEVICE_MAC" "$BLUEUTIL_PATH" > "$CONFIG_DIR/config"
 
 /bin/launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
 cat > "$PLIST" <<EOF
