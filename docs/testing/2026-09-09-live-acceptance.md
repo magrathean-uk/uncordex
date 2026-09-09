@@ -28,7 +28,7 @@ Evidence sources: `~/Library/Logs/uncordex.log`, `~/Library/Logs/uncordex-error.
 
 ## Package installation acceptance
 
-The final signed `Uncordex-1.0.0.pkg` was installed on this Mac with the native command-line Installer. Installer completed successfully and registered receipt `uk.magrathean.uncordex.pkg` at version 1.0.0. The package placed `/Applications/Uncordex.app` on disk. Its SHA-256 is `cad60ac1a27f3475468a44ffca3a19ee18580af305d76965236ed577f7159167`.
+The final signed `Uncordex-1.0.0.pkg`, built from documentation commit `c0de4f49b07961778ca875e034495cf621e68442`, was installed on this Mac with the native command-line Installer. Installer completed successfully and registered receipt `uk.magrathean.uncordex.pkg` at version 1.0.0. The package placed `/Applications/Uncordex.app` on disk. Its SHA-256 is `bb452684cfc59c2e9ae5c4b96305245da9944c5b5416e6178a7f10de4f4ed170`.
 
 The installed app passed strict code-signature validation with the Developer ID Application identity for team `4AA2EMZ2HA`. Its executable contains arm64 and x86_64 slices, its bundle version is 1.0.0, and its minimum system version is macOS 13.0. The installed app launched outside demo mode and showed the saved Bose/ASUS setup and the live watcher as Running.
 

@@ -44,7 +44,7 @@ packaging/test.sh
 
 Use `UNCORDEX_PKG_REQUIRE_NOTARIZED=1` for a notarized package. A signed but unnotarized package is structurally valid but may be blocked by Gatekeeper when downloaded on another Mac.
 
-The 1.0.0 package built from commit `2576d4431e8cda36cac5cbd6fafe06cf18af4c90` has SHA-256 `cad60ac1a27f3475468a44ffca3a19ee18580af305d76965236ed577f7159167`. It is Developer ID Application and Developer ID Installer signed for team `4AA2EMZ2HA`, timestamped, and intentionally not notarized.
+The 1.0.0 package built from commit `c0de4f49b07961778ca875e034495cf621e68442` has SHA-256 `bb452684cfc59c2e9ae5c4b96305245da9944c5b5416e6178a7f10de4f4ed170`. It is Developer ID Application and Developer ID Installer signed for team `4AA2EMZ2HA`, timestamped, and intentionally not notarized.
 
 That exact package was installed on the development Mac as a physical acceptance check. Native Installer registered the expected receipt, installed the universal app in `/Applications`, and did not restart the already-running per-user service. The installed app launched and displayed the live setup. This remains one-host evidence; macOS 13 and Intel installation still require separate host checks.
 
