@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><array>
+  <dict>
+    <key>Device Model Name</key><string>Mac host controller</string>
+    <key>Device Vendor Name</key><string>Apple Inc.</string>
+    <key>Route String</key><integer>0</integer>
+    <key>UID</key><integer>408830018239638050</integer>
+  </dict>
+  <dict>
+    <key>Device Model Name</key><string>Desk Dock</string>
+    <key>Device Vendor Name</key><string>Example Vendor</string>
+    <key>Route String</key><integer>1</integer>
+    <key>UID</key><integer>-8123456789012345678</integer>
+  </dict>
+</array></plist>

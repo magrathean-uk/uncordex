@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><array>
+  <dict>
+    <key>bDeviceClass</key><integer>9</integer>
+    <key>idVendor</key><integer>1111</integer>
+    <key>idProduct</key><integer>2222</integer>
+    <key>USB Serial Number</key><string>HUB-SERIAL-01</string>
+    <key>USB Product Name</key><string>Desk USB-C Hub</string>
+  </dict>
+  <dict>
+    <key>bDeviceClass</key><integer>0</integer>
+    <key>idVendor</key><integer>3333</integer>
+    <key>idProduct</key><integer>4444</integer>
+    <key>USB Serial Number</key><string>SPEAKER-SERIAL</string>
+    <key>USB Product Name</key><string>USB Speaker</string>
+  </dict>
+</array></plist>

@@ -1,68 +1,544 @@
 #!/bin/bash
-# Disconnect one Bluetooth speaker on battery; reconnect it on AC power.
-set -euo pipefail
+# Source-aware Bluetooth speaker power watcher for macOS.
+set -u
 
-CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/unplugged-speaker/config"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/unplugged-speaker"
-STATE_FILE="$STATE_DIR/last-power"
+WATCHER_STATE_SCHEMA=1
+WATCHER_POLL_SECONDS="${WATCHER_POLL_SECONDS:-5}"
+WATCHER_WINDOW_SECONDS="${WATCHER_WINDOW_SECONDS:-300}"
+WATCHER_LOG_ENABLED="${WATCHER_LOG_ENABLED:-0}"
 
-if [ ! -r "$CONFIG_FILE" ]; then
-  echo "Missing config: $CONFIG_FILE" >&2
-  exit 1
-fi
-
-# shellcheck disable=SC1090
-. "$CONFIG_FILE"
-: "${DEVICE_MAC:?DEVICE_MAC is required in $CONFIG_FILE}"
-
-if [ -z "${BLUEUTIL:-}" ]; then
-  for candidate in /opt/homebrew/bin/blueutil /usr/local/bin/blueutil; do
-    if [ -x "$candidate" ]; then
-      BLUEUTIL="$candidate"
-      break
-    fi
-  done
-fi
-
-if [ -z "${BLUEUTIL:-}" ]; then
-  BLUEUTIL="$(command -v blueutil 2>/dev/null || true)"
-fi
-
-if [ -z "$BLUEUTIL" ] || [ ! -x "$BLUEUTIL" ]; then
-  echo "blueutil not found. Re-run install.sh or set BLUEUTIL in $CONFIG_FILE" >&2
-  exit 1
-fi
-
-mkdir -p "$STATE_DIR"
-
-power_source() {
-  /usr/bin/pmset -g ps | /usr/bin/head -n 1 | /usr/bin/sed -E "s/.*'([^']+)'.*/\\1/"
+log_event() {
+  [ "$WATCHER_LOG_ENABLED" = "1" ] || return 0
+  /usr/bin/printf '%s %s\n' "$(/bin/date '+%Y-%m-%dT%H:%M:%S%z')" "$*"
 }
 
-disconnect_speaker() {
-  "$BLUEUTIL" --disconnect "$DEVICE_MAC" >/dev/null 2>&1 || true
+log_error() {
+  [ "$WATCHER_LOG_ENABLED" = "1" ] || return 0
+  /usr/bin/printf '%s %s\n' "$(/bin/date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >&2
 }
 
-connect_speaker() {
-  for _ in 1 2 3; do
-    "$BLUEUTIL" --is-connected "$DEVICE_MAC" 2>/dev/null | /usr/bin/grep -q 1 && return 0
-    "$BLUEUTIL" --connect "$DEVICE_MAC" >/dev/null 2>&1 || true
-    /bin/sleep 5
-  done
+watcher_reset_runtime() {
+  PHASE=idle
+  ATTEMPTS=0
+  NEXT_ATTEMPT=0
+  WINDOW_DEADLINE=0
+  LAST_POWER=unknown
+  LAST_SOURCE=unknown
+  DEPARTURE_OBSERVED=0
+  SOURCE_STREAK_VALUE=unknown
+  SOURCE_STREAK_COUNT=0
+  FRESH_POWER=0
+  FRESH_SOURCE=0
+  POWER_BASELINE_READY=0
+  SOURCE_BASELINE_READY=0
 }
 
-last=""
-[ -f "$STATE_FILE" ] && last="$(/bin/cat "$STATE_FILE" 2>/dev/null || true)"
+_watcher_state_valid() {
+  case "$PHASE" in idle|disconnecting|pending|paused) ;; *) return 1 ;; esac
+  case "$LAST_POWER" in ac|battery|unknown) ;; *) return 1 ;; esac
+  case "$LAST_SOURCE" in match|absent|unknown) ;; *) return 1 ;; esac
+  case "$DEPARTURE_OBSERVED" in 0|1) ;; *) return 1 ;; esac
+  case "$ATTEMPTS" in ''|*[!0-9]*) return 1 ;; esac
+  case "$NEXT_ATTEMPT" in ''|*[!0-9]*) return 1 ;; esac
+  case "$WINDOW_DEADLINE" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$ATTEMPTS" -le 6 ] || return 1
+  return 0
+}
 
-while true; do
-  current="$(power_source)"
-  if [ "$current" != "$last" ]; then
-    case "$current" in
-      "Battery Power") disconnect_speaker ;;
-      "AC Power") connect_speaker ;;
-    esac
-    /usr/bin/printf '%s' "$current" > "$STATE_FILE"
-    last="$current"
+_watcher_state_signature() {
+  /usr/bin/printf '%s|' "$PHASE" "$ATTEMPTS" "$NEXT_ATTEMPT" "$WINDOW_DEADLINE" "$LAST_POWER" "$LAST_SOURCE" "$DEPARTURE_OBSERVED"
+}
+
+save_state() {
+  local state_dir temporary
+  [ -n "${STATE_FILE:-}" ] || return 0
+  state_dir="$(/usr/bin/dirname "$STATE_FILE")"
+  /bin/mkdir -p "$state_dir" || return 1
+  /bin/chmod 700 "$state_dir" 2>/dev/null || true
+  temporary="$(/usr/bin/mktemp "${STATE_FILE}.XXXXXX")" || return 1
+  if ! /usr/bin/printf '%s\n' \
+    "schema=$WATCHER_STATE_SCHEMA" \
+    "boot=$BOOT_ID" \
+    "binding=$STATE_BINDING" \
+    "phase=$PHASE" \
+    "attempts=$ATTEMPTS" \
+    "next_attempt=$NEXT_ATTEMPT" \
+    "window_deadline=$WINDOW_DEADLINE" \
+    "last_power=$LAST_POWER" \
+    "last_source=$LAST_SOURCE" \
+    "departure_observed=$DEPARTURE_OBSERVED" >"$temporary"; then
+    /bin/rm -f "$temporary"
+    return 1
   fi
-  /bin/sleep 5
-done
+  /bin/chmod 600 "$temporary" || { /bin/rm -f "$temporary"; return 1; }
+  /bin/mv -f "$temporary" "$STATE_FILE"
+}
+
+load_state() {
+  local line name value schema boot binding phase attempts next_attempt window_deadline last_power last_source departure_observed
+  watcher_reset_runtime
+  [ -r "${STATE_FILE:-}" ] || return 1
+  schema=""; boot=""; binding=""; phase=""; attempts=""; next_attempt=""
+  window_deadline=""; last_power=""; last_source=""; departure_observed=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *=*) name="${line%%=*}"; value="${line#*=}" ;;
+      *) watcher_reset_runtime; return 1 ;;
+    esac
+    case "$name" in
+      schema) schema="$value" ;;
+      boot) boot="$value" ;;
+      binding) binding="$value" ;;
+      phase) phase="$value" ;;
+      attempts) attempts="$value" ;;
+      next_attempt) next_attempt="$value" ;;
+      window_deadline) window_deadline="$value" ;;
+      last_power) last_power="$value" ;;
+      last_source) last_source="$value" ;;
+      departure_observed) departure_observed="$value" ;;
+      *) watcher_reset_runtime; return 1 ;;
+    esac
+  done <"$STATE_FILE"
+  [ "$schema" = "$WATCHER_STATE_SCHEMA" ] || return 1
+  [ "$boot" = "$BOOT_ID" ] || return 1
+  [ "$binding" = "$STATE_BINDING" ] || return 1
+  PHASE="$phase"; ATTEMPTS="$attempts"; NEXT_ATTEMPT="$next_attempt"
+  WINDOW_DEADLINE="$window_deadline"; LAST_POWER="$last_power"
+  LAST_SOURCE="$last_source"; DEPARTURE_OBSERVED="$departure_observed"
+  if ! _watcher_state_valid; then watcher_reset_runtime; return 1; fi
+  if [ "$PHASE" = disconnecting ]; then
+    PHASE=idle
+    DEPARTURE_OBSERVED=0
+    ATTEMPTS=0
+    NEXT_ATTEMPT=0
+    WINDOW_DEADLINE=0
+  fi
+  return 0
+}
+
+_watch_run_bounded() {
+  local seconds output_file error_file command_pid ticks limit_ticks result
+  seconds="$1"; output_file="$2"; error_file="$3"; shift 3
+  "$@" >"$output_file" 2>"$error_file" &
+  command_pid=$!
+  ticks=0
+  limit_ticks=$((seconds * 10))
+  while /bin/kill -0 "$command_pid" 2>/dev/null; do
+    if [ "$ticks" -ge "$limit_ticks" ]; then
+      /bin/kill -TERM "$command_pid" 2>/dev/null || true
+      /bin/sleep 1
+      /bin/kill -KILL "$command_pid" 2>/dev/null || true
+      wait "$command_pid" 2>/dev/null || true
+      return 124
+    fi
+    /bin/sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  wait "$command_pid"
+  result=$?
+  return "$result"
+}
+
+_watch_temp_file() { /usr/bin/mktemp "${TMPDIR:-/tmp}/uncordex-watch.XXXXXX"; }
+
+watcher_now() {
+  if [ -n "${UNCORDEX_FIXED_NOW:-}" ]; then /usr/bin/printf '%s\n' "$UNCORDEX_FIXED_NOW"
+  else /bin/date +%s; fi
+}
+
+read_power() {
+  local first_line
+  first_line="$(/usr/bin/pmset -g ps 2>/dev/null | /usr/bin/head -n 1)" || {
+    /usr/bin/printf '%s\n' unknown
+    return 0
+  }
+  case "$first_line" in
+    *"'AC Power'"*) /usr/bin/printf '%s\n' ac ;;
+    *"'Battery Power'"*) /usr/bin/printf '%s\n' battery ;;
+    *) /usr/bin/printf '%s\n' unknown ;;
+  esac
+}
+
+read_saved_source() {
+  if [ "$RECONNECT_MODE" = source ]; then
+    # Assigned by validated configuration before the production loop starts.
+    # shellcheck disable=SC2153
+    source_presence "$SOURCE_KIND" "$SOURCE_KEY"
+  else
+    /usr/bin/printf '%s\n' match
+  fi
+}
+
+_blueutil_value() {
+  local output error result value
+  output="$(_watch_temp_file)" || return 1
+  error="$(_watch_temp_file)" || { /bin/rm -f "$output"; return 1; }
+  _watch_run_bounded 15 "$output" "$error" "$BLUEUTIL" "$@"
+  result=$?
+  value="$(/bin/cat "$output" 2>/dev/null)"
+  if [ "$result" -ne 0 ]; then
+    log_error "blueutil query failed (status $result): $(/bin/cat "$error" 2>/dev/null)"
+    /bin/rm -f "$output" "$error"
+    return 1
+  fi
+  /bin/rm -f "$output" "$error"
+  /usr/bin/printf '%s\n' "$value"
+}
+
+speaker_state() {
+  local value
+  value="$(_blueutil_value --is-connected "$DEVICE_MAC")" || {
+    /usr/bin/printf '%s\n' unknown
+    return 0
+  }
+  case "$value" in 0|1) /usr/bin/printf '%s\n' "$value" ;; *) /usr/bin/printf '%s\n' unknown ;; esac
+}
+
+bluetooth_available() {
+  local value
+  value="$(_blueutil_value --power)" || return 1
+  [ "$value" = 1 ]
+}
+
+_blueutil_action() {
+  local action output error result message
+  action="$1"
+  output="$(_watch_temp_file)" || return 1
+  error="$(_watch_temp_file)" || { /bin/rm -f "$output"; return 1; }
+  _watch_run_bounded 15 "$output" "$error" "$BLUEUTIL" "--$action" "$DEVICE_MAC"
+  result=$?
+  message="$(/bin/cat "$error" 2>/dev/null)"
+  /bin/rm -f "$output" "$error"
+  if [ "$result" -ne 0 ]; then
+    log_error "Bluetooth $action failed (status $result): $message"
+    return "$result"
+  fi
+  return 0
+}
+
+perform_disconnect() { _blueutil_action disconnect; }
+perform_connect() { _blueutil_action connect; }
+
+_restore_context_matches() {
+  local power source
+  power="$(read_power)"
+  [ "$power" = ac ] || return 1
+  if [ "$RECONNECT_MODE" = source ]; then
+    [ "$FRESH_SOURCE" -eq 1 ] || return 1
+    [ "$LAST_SOURCE" = match ] || return 1
+    source="$(read_saved_source)"
+    [ "$source" = match ] || return 1
+  fi
+  return 0
+}
+
+_schedule_after_failure() {
+  local now delay
+  now="$1"
+  if [ "$ATTEMPTS" -ge 6 ] || [ "$now" -ge "$WINDOW_DEADLINE" ]; then
+    PHASE=paused
+    NEXT_ATTEMPT=0
+    if [ "$ATTEMPTS" -ge 6 ]; then log_error "Automatic reconnect paused after six unsuccessful attempts"
+    else log_error "Automatic reconnect window expired"; fi
+    return 0
+  fi
+  case "$ATTEMPTS" in 1) delay=5 ;; 2) delay=10 ;; 3) delay=20 ;; 4) delay=40 ;; *) delay=60 ;; esac
+  NEXT_ATTEMPT=$((now + delay))
+}
+
+_consume_permission() {
+  PHASE=idle
+  ATTEMPTS=0
+  NEXT_ATTEMPT=0
+  WINDOW_DEADLINE=0
+  DEPARTURE_OBSERVED=0
+}
+
+_handle_departure() {
+  local qualified connected after
+  qualified="$1"; connected="$2"
+  [ "$connected" = 1 ] || return 0
+  PHASE=disconnecting
+  DEPARTURE_OBSERVED=0
+  save_state || log_error "Could not persist disconnecting state"
+  log_event "Confirmed departure; disconnecting configured speaker"
+  if ! perform_disconnect; then
+    PHASE=idle
+    save_state || true
+    return 0
+  fi
+  after="$(speaker_state)"
+  if [ "$after" != 0 ]; then
+    log_error "Disconnect command completed but disconnected state was not verified"
+    PHASE=idle
+    save_state || true
+    return 0
+  fi
+  if [ "$RECONNECT_MODE" != disconnect_only ] && [ "$qualified" -eq 1 ]; then
+    PHASE=pending
+    DEPARTURE_OBSERVED=1
+    ATTEMPTS=0
+    NEXT_ATTEMPT=0
+    WINDOW_DEADLINE=0
+    log_event "Disconnect verified; restore permission is pending an eligible return"
+  else
+    _consume_permission
+    log_event "Disconnect verified; no restore permission was created"
+  fi
+  save_state || log_error "Could not persist post-disconnect state"
+}
+
+_attempt_restore() {
+  local now before after post_power post_source
+  now="$1"
+  [ "$PHASE" = pending ] || return 0
+  [ "$WINDOW_DEADLINE" -gt 0 ] || return 0
+  if [ "$now" -gt "$WINDOW_DEADLINE" ]; then
+    PHASE=paused
+    NEXT_ATTEMPT=0
+    save_state || true
+    log_error "Automatic reconnect window expired"
+    return 0
+  fi
+  [ "$ATTEMPTS" -lt 6 ] || { PHASE=paused; save_state || true; return 0; }
+  [ "$now" -ge "$NEXT_ATTEMPT" ] || return 0
+  _restore_context_matches || return 0
+  bluetooth_available || return 0
+  before="$(speaker_state)"
+  case "$before" in 1) _consume_permission; save_state || true; return 0 ;; 0) ;; *) return 0 ;; esac
+  ATTEMPTS=$((ATTEMPTS + 1))
+  if ! save_state; then
+    ATTEMPTS=$((ATTEMPTS - 1))
+    PHASE=paused
+    NEXT_ATTEMPT=0
+    log_error "Reconnect paused because its attempt budget could not be persisted"
+    return 0
+  fi
+  log_event "Reconnect attempt $ATTEMPTS of 6"
+  perform_connect || true
+  after="$(speaker_state)"
+  post_power="$(read_power)"
+  post_source=match
+  if [ "$RECONNECT_MODE" = source ]; then post_source="$(read_saved_source)"; fi
+  if [ "$post_power" != ac ] || { [ "$RECONNECT_MODE" = source ] && [ "$post_source" != match ]; }; then
+    if [ "$after" = 1 ]; then
+      log_error "Saved source disappeared during reconnect; attempting guarded rollback"
+      if perform_disconnect && [ "$(speaker_state)" = 0 ]; then
+        PHASE=pending
+        DEPARTURE_OBSERVED=1
+        ATTEMPTS=0
+        NEXT_ATTEMPT=0
+        WINDOW_DEADLINE=0
+        save_state || true
+        log_event "Rollback disconnect verified; waiting for a new return"
+      else
+        _consume_permission
+        save_state || true
+        log_error "Rollback disconnect was not verified; restore permission cleared"
+      fi
+    else
+      PHASE=pending
+      DEPARTURE_OBSERVED=1
+      ATTEMPTS=0
+      NEXT_ATTEMPT=0
+      WINDOW_DEADLINE=0
+      save_state || true
+      log_event "Source departed during reconnect; no further attempt is scheduled until it returns"
+    fi
+    return 0
+  fi
+  if [ "$after" = 1 ]; then
+    if [ "$post_power" = ac ] && { [ "$RECONNECT_MODE" != source ] || [ "$post_source" = match ]; }; then
+      _consume_permission
+      save_state || true
+      log_event "Speaker reconnection verified"
+      return 0
+    fi
+  fi
+  now="$(watcher_now)"
+  _schedule_after_failure "$now"
+  save_state || log_error "Could not persist reconnect schedule"
+}
+
+watcher_tick() {
+  local now raw_power raw_source connected previous_power previous_source source_changed departure qualified initial_signature
+  now="$1"
+  if [ "${UNCORDEX_SIMULATED_CLOCK:-0}" = 1 ]; then UNCORDEX_FIXED_NOW="$now"; fi
+  initial_signature="$(_watcher_state_signature)"
+  raw_power="$(read_power)"
+  case "$raw_power" in ac|battery) ;; *) raw_power=unknown ;; esac
+  raw_source=match
+  if [ "$RECONNECT_MODE" = source ]; then
+    raw_source="$(read_saved_source)"
+    case "$raw_source" in match|absent) ;; *) raw_source=unknown ;; esac
+  fi
+  connected="$(speaker_state)"
+  case "$connected" in 0|1) ;; *) connected=unknown ;; esac
+  previous_power="$LAST_POWER"; previous_source="$LAST_SOURCE"
+  source_changed=0; departure=0; qualified=0
+
+  if [ "$raw_power" != unknown ]; then
+    FRESH_POWER=1
+    if [ "$POWER_BASELINE_READY" -eq 0 ]; then
+      LAST_POWER="$raw_power"
+      previous_power="$raw_power"
+      POWER_BASELINE_READY=1
+    else
+      LAST_POWER="$raw_power"
+    fi
+  fi
+  if [ "$RECONNECT_MODE" = source ]; then
+    if [ "$raw_source" = unknown ]; then
+      SOURCE_STREAK_VALUE=unknown; SOURCE_STREAK_COUNT=0
+    else
+      if [ "$SOURCE_STREAK_VALUE" = "$raw_source" ]; then
+        SOURCE_STREAK_COUNT=$((SOURCE_STREAK_COUNT + 1))
+      else
+        SOURCE_STREAK_VALUE="$raw_source"; SOURCE_STREAK_COUNT=1
+      fi
+      if [ "$SOURCE_STREAK_COUNT" -ge 2 ]; then
+        FRESH_SOURCE=1
+        if [ "$SOURCE_BASELINE_READY" -eq 0 ]; then
+          LAST_SOURCE="$raw_source"
+          previous_source="$raw_source"
+          SOURCE_BASELINE_READY=1
+        elif [ "$LAST_SOURCE" != "$raw_source" ]; then
+          LAST_SOURCE="$raw_source"
+          source_changed=1
+        fi
+      fi
+    fi
+  else
+    LAST_SOURCE=match; FRESH_SOURCE=1; SOURCE_BASELINE_READY=1
+  fi
+
+  if { [ "$PHASE" = pending ] || [ "$PHASE" = paused ]; } && [ "$connected" = 1 ]; then
+    _consume_permission
+    log_event "Observed a manual connection; restore permission consumed"
+  fi
+  if [ "$previous_power" = ac ] && [ "$raw_power" = battery ]; then
+    departure=1
+    if [ "$RECONNECT_MODE" = any_power ]; then qualified=1
+    elif [ "$RECONNECT_MODE" = source ] && [ "$previous_source" = match ]; then qualified=1
+    fi
+  elif [ "$RECONNECT_MODE" = source ] && [ "$source_changed" -eq 1 ] && [ "$previous_source" = match ] && [ "$LAST_SOURCE" = absent ] && [ "$previous_power" = ac ]; then
+    departure=1; qualified=1
+  fi
+  if [ "$departure" -eq 1 ]; then
+    if { [ "$PHASE" = pending ] || [ "$PHASE" = paused ]; } && [ "$connected" = 0 ] && [ "$qualified" -eq 1 ]; then
+      PHASE=pending
+      DEPARTURE_OBSERVED=1
+      ATTEMPTS=0
+      NEXT_ATTEMPT=0
+      WINDOW_DEADLINE=0
+      save_state || true
+      log_event "A new departure was confirmed; reconnect budget will reopen on return"
+    else
+      _handle_departure "$qualified" "$connected"
+    fi
+  fi
+
+  if [ "$PHASE" = pending ] && [ "$DEPARTURE_OBSERVED" -eq 1 ]; then
+    if [ "$raw_power" = ac ] && [ "$FRESH_POWER" -eq 1 ]; then
+      if [ "$RECONNECT_MODE" = any_power ] || { [ "$raw_source" = match ] && [ "$LAST_SOURCE" = match ] && [ "$FRESH_SOURCE" -eq 1 ]; }; then
+        DEPARTURE_OBSERVED=0
+        ATTEMPTS=0
+        NEXT_ATTEMPT="$now"
+        WINDOW_DEADLINE=$((now + WATCHER_WINDOW_SECONDS))
+        save_state || true
+        log_event "Eligible return confirmed; reconnect window opened"
+      fi
+    fi
+  fi
+  _attempt_restore "$now"
+  if [ "$initial_signature" != "$(_watcher_state_signature)" ]; then
+    save_state || log_error "Could not persist watcher state"
+  fi
+}
+
+load_config() {
+  local source_key_value
+  [ -r "$CONFIG_FILE" ] || { log_error "Missing config: $CONFIG_FILE"; return 1; }
+  # The installer is the only writer and shell-escapes every value.
+  # shellcheck disable=SC1090
+  . "$CONFIG_FILE"
+  [ "${CONFIG_VERSION:-}" = 1 ] || { log_error "Unsupported CONFIG_VERSION"; return 1; }
+  [ -n "${DEVICE_MAC:-}" ] || { log_error "DEVICE_MAC is missing"; return 1; }
+  case "$DEVICE_MAC" in
+    [[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]]) ;;
+    *) log_error "Invalid DEVICE_MAC"; return 1 ;;
+  esac
+  case "${RECONNECT_MODE:-}" in source|any_power|disconnect_only) ;; *) log_error "Invalid RECONNECT_MODE"; return 1 ;; esac
+  if [ "$RECONNECT_MODE" = source ]; then
+    case "${SOURCE_KIND:-}" in thunderbolt|usb|adapter) ;; *) log_error "Invalid SOURCE_KIND"; return 1 ;; esac
+    source_key_value="${SOURCE_KEY:-}"
+    [ "${#source_key_value}" -eq 64 ] || { log_error "Invalid SOURCE_KEY"; return 1; }
+    case "$source_key_value" in *[!0-9a-f]*) log_error "Invalid SOURCE_KEY"; return 1 ;; esac
+  fi
+  [ -x "${BLUEUTIL:-}" ] || { log_error "Configured blueutil is not executable"; return 1; }
+}
+
+compute_boot_id() {
+  local boot_time
+  if [ -n "${UNCORDEX_BOOT_ID:-}" ]; then
+    /usr/bin/printf '%s\n' "$UNCORDEX_BOOT_ID"
+    return 0
+  fi
+  boot_time="$(/usr/sbin/sysctl -n kern.boottime 2>/dev/null)" || return 1
+  [ -n "$boot_time" ] || return 1
+  /usr/bin/printf '%s\0' "$boot_time" | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
+}
+
+compute_binding() {
+  /usr/bin/printf '%s\0' "$DEVICE_MAC" "$RECONNECT_MODE" "${SOURCE_KIND:-}" "${SOURCE_KEY:-}" |
+    /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
+}
+
+show_status() {
+  local masked reason
+  if ! load_state; then watcher_reset_runtime; fi
+  masked=none
+  if [ -n "${SOURCE_KEY:-}" ]; then masked="${SOURCE_KEY:0:4}...${SOURCE_KEY: -4}"; fi
+  case "$PHASE:$DEPARTURE_OBSERVED" in
+    pending:1) reason="waiting for an eligible source return" ;;
+    pending:0) reason="eligible return active; waiting for success or the next scheduled attempt" ;;
+    paused:*) reason="automatic retries paused until a genuine depart-and-return cycle" ;;
+    disconnecting:*) reason="disconnect result was not confirmed" ;;
+    *) reason="no watcher-owned restore is pending" ;;
+  esac
+  /usr/bin/printf '%s\n' \
+    "mode: $RECONNECT_MODE" \
+    "source: ${SOURCE_LABEL:-none} ($masked)" \
+    "phase: $PHASE" \
+    "last power: $LAST_POWER" \
+    "last source: $LAST_SOURCE" \
+    "reason: $reason" \
+    "attempts: $ATTEMPTS of 6" \
+    "next attempt: $NEXT_ATTEMPT" \
+    "window deadline: $WINDOW_DEADLINE"
+}
+
+watcher_main() {
+  local now
+  SCRIPT_DIR="$(cd "$(/usr/bin/dirname "$0")" && pwd)"
+  CONFIG_FILE="${UNCORDEX_CONFIG_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/uncordex/config}"
+  STATE_DIR="${UNCORDEX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/uncordex}"
+  STATE_FILE="${UNCORDEX_STATE_FILE:-$STATE_DIR/runtime-state}"
+  WATCHER_LOG_ENABLED=1
+  load_config || return 1
+  # shellcheck source=lib/source.sh
+  . "$SCRIPT_DIR/lib/source.sh"
+  BOOT_ID="$(compute_boot_id)" || { log_error "Could not determine the current boot identity"; return 1; }
+  STATE_BINDING="$(compute_binding)" || { log_error "Could not bind runtime state to this rule"; return 1; }
+  if [ "${1:-}" = --status ]; then show_status; return 0; fi
+  if [ -n "${1:-}" ]; then log_error "Usage: $0 [--status]"; return 64; fi
+  if ! load_state; then watcher_reset_runtime; log_event "Starting with a fresh baseline; no restore permission inferred"
+  else log_event "Restored same-boot watcher state: $PHASE"; fi
+  while true; do
+    now="$(watcher_now)"
+    watcher_tick "$now"
+    /bin/sleep "$WATCHER_POLL_SECONDS"
+  done
+}
+
+if [ "${UNCORDEX_WATCHER_LIBRARY_ONLY:-0}" != 1 ]; then watcher_main "$@"; fi

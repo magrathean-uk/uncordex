@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+  <dict>
+    <key>AdapterDetails</key>
+    <dict>
+      <key>Description</key><string>USB-C Power Adapter</string>
+      <key>FamilyCode</key><integer>42</integer>
+      <key>SerialNumber</key><integer>123456789</integer>
+      <key>Watts</key><integer>45</integer>
+      <key>Current</key><integer>2250</integer>
+      <key>Voltage</key><integer>20000</integer>
+    </dict>
+  </dict>
+</array>
+</plist>
