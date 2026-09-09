@@ -445,6 +445,27 @@ run_installer() {
 
 make_fake_install_tools
 
+gui_missing_plist="$TEST_ROOT/gui-status-missing.plist"
+run_installer gui-status-missing --gui-status-plist >"$gui_missing_plist"
+assert_eq "missing" "$(/usr/bin/plutil -extract config_state raw -n "$gui_missing_plist")" "GUI status reports missing configuration without creating it"
+if [ ! -e "$TEST_ROOT/gui-status-missing" ]; then pass "GUI status is read-only"
+else fail "GUI status is read-only"; fi
+
+gui_valid_base="$TEST_ROOT/gui-status-valid"
+/bin/mkdir -p "$gui_valid_base/config"
+/usr/bin/printf '%s\n' \
+  'CONFIG_VERSION=1' \
+  'DEVICE_MAC=AA-BB-CC-DD-EE-FF' \
+  "BLUEUTIL=$FAKE_BLUEUTIL" \
+  'RECONNECT_MODE=source' \
+  'SOURCE_KIND=thunderbolt' \
+  "SOURCE_KEY=$dock_key" \
+  'SOURCE_LABEL=Test\ Dock' >"$gui_valid_base/config/config"
+gui_valid_plist="$TEST_ROOT/gui-status-valid.plist"
+run_installer gui-status-valid --gui-status-plist >"$gui_valid_plist"
+assert_eq "valid" "$(/usr/bin/plutil -extract config_state raw -n "$gui_valid_plist")" "GUI status validates installer-owned configuration"
+assert_eq "match" "$(/usr/bin/plutil -extract current_source raw -n "$gui_valid_plist")" "GUI status distinguishes a current source reading"
+
 INSTALL_BASE="$TEST_ROOT/discover"
 discover_output="$(run_installer discover --discover 2>&1)"
 discover_status=$?
@@ -489,6 +510,11 @@ assert_eq "0" "$dry_status" "explicit any-power dry-run validates"
 assert_contains "any external power" "$dry_output" "dry-run previews broad matching clearly"
 if [ ! -e "$TEST_ROOT/dry" ]; then pass "dry-run leaves installation paths untouched"
 else fail "dry-run leaves installation paths untouched"; fi
+
+no_dependency_install_output="$(run_installer no-dependency-install AA-BB-CC-DD-EE-FF --any-power --no-install-dependencies 2>&1)"
+no_dependency_install_status=$?
+assert_eq "0" "$no_dependency_install_status" "app-managed setup accepts the no-dependency-install boundary"
+assert_contains "Installed uk.magrathean.uncordex.watch-power" "$no_dependency_install_output" "no-dependency-install setup still uses the canonical installer"
 
 conflict_output="$(run_installer conflict AA-BB-CC-DD-EE-FF --any-power --disconnect-only --dry-run 2>&1)"
 conflict_status=$?
@@ -555,6 +581,10 @@ assert_eq "0" "$status_status" "installed watcher status is readable"
 assert_contains "mode: any_power" "$status_output" "status reports the configured rule"
 if [ ! -e "$status_state" ]; then pass "status does not create runtime state"
 else fail "status does not create runtime state"; fi
+status_plist="$TEST_ROOT/status-only/watcher-status.plist"
+/bin/mkdir -p "$TEST_ROOT/status-only"
+UNCORDEX_WATCHER_LIBRARY_ONLY=0 UNCORDEX_CONFIG_FILE="$TEST_ROOT/success/config/config" UNCORDEX_STATE_FILE="$status_state" "$TEST_ROOT/success/app/watch-power" --status-plist >"$status_plist"
+assert_eq "false" "$(/usr/bin/plutil -extract state_valid raw -n "$status_plist")" "machine watcher status marks missing cache as invalid"
 
 UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT=1
 export UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT

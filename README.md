@@ -25,7 +25,9 @@ Apple Silicon (`/opt/homebrew`) and Intel (`/usr/local`) Homebrew paths are supp
 
 ## Quick start
 
-First, connect the dock or charger you want to save and discover whether macOS exposes a unique identity:
+For a packaged installation, install `Uncordex-1.0.0.pkg`, open Uncordex from Applications, and complete **Speaker & Rule**. See [macOS installer package](docs/pkg.md) for package behavior, validation, and removal.
+
+For a source installation, first connect the dock or charger you want to save and discover whether macOS exposes a unique identity:
 
 ```bash
 git clone https://github.com/magrathean-uk/uncordex.git
@@ -98,6 +100,7 @@ Application files, configuration, state, backups, and logs remain for recovery o
 - [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
 - [Development and verification](docs/development.md)
+- [macOS installer package](docs/pkg.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Release process](docs/releasing.md)

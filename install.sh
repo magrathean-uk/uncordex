@@ -11,6 +11,8 @@ usage() {
     "  $0 SPEAKER_ADDRESS --disconnect-only" \
     "  $0 [SPEAKER_ADDRESS] --relearn" \
     "  $0 --discover" \
+    "  $0 --gui-status-plist" \
+    "  Add --no-install-dependencies for app-managed setup." \
     "  Add --dry-run to validate and preview without installing."
 }
 
@@ -35,6 +37,8 @@ REQUEST_ANY=0
 REQUEST_DISCONNECT=0
 RELEARN=0
 DISCOVER_ONLY=0
+GUI_STATUS_PLIST=0
+NO_INSTALL_DEPENDENCIES=0
 DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
@@ -48,6 +52,8 @@ while [ "$#" -gt 0 ]; do
     --disconnect-only) REQUEST_DISCONNECT=1; shift ;;
     --relearn) RELEARN=1; shift ;;
     --discover) DISCOVER_ONLY=1; shift ;;
+    --gui-status-plist) GUI_STATUS_PLIST=1; shift ;;
+    --no-install-dependencies) NO_INSTALL_DEPENDENCIES=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --*) fail "unknown option: $1" ;;
@@ -65,6 +71,7 @@ mode_count=0
 [ "$REQUEST_DISCONNECT" -eq 1 ] && mode_count=$((mode_count + 1))
 [ "$mode_count" -le 1 ] || fail "--source, --any-power, and --disconnect-only are mutually exclusive"
 [ "$RELEARN" -eq 0 ] || [ "$mode_count" -eq 0 ] || fail "--relearn cannot be combined with a mode flag"
+[ "$GUI_STATUS_PLIST" -eq 0 ] || { [ -z "$REQUESTED_MAC" ] && [ "$mode_count" -eq 0 ] && [ "$RELEARN" -eq 0 ] && [ "$DISCOVER_ONLY" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] && [ "$NO_INSTALL_DEPENDENCIES" -eq 0 ]; } || fail "--gui-status-plist cannot be combined with setup options"
 
 for required in "$PLUTIL" /usr/sbin/ioreg /usr/bin/shasum /usr/bin/mktemp; do
   [ -x "$required" ] || fail "required macOS tool is unavailable: $required"
@@ -110,11 +117,14 @@ SAVED_MODE=""
 SAVED_KIND=""
 SAVED_KEY=""
 SAVED_LABEL=""
+CONFIG_PRESENT=0
+CONFIG_LOAD_OK=1
 if [ -r "$CONFIG_FILE" ]; then
+  CONFIG_PRESENT=1
   unset CONFIG_VERSION DEVICE_MAC BLUEUTIL RECONNECT_MODE SOURCE_KIND SOURCE_KEY SOURCE_LABEL 2>/dev/null || true
   # This file is owned by the current user and written with Bash-safe quoting.
   # shellcheck disable=SC1090
-  . "$CONFIG_FILE"
+  if ! . "$CONFIG_FILE"; then CONFIG_LOAD_OK=0; fi
   SAVED_MAC="${DEVICE_MAC:-}"
   SAVED_BLUEUTIL="${BLUEUTIL:-}"
   SAVED_MODE="${RECONNECT_MODE:-}"
@@ -142,6 +152,76 @@ find_blueutil() {
 }
 
 BLUEUTIL_PATH="$(find_blueutil || true)"
+
+print_gui_status_plist() {
+  local status_file config_state config_error current_power current_source
+  config_state=valid
+  config_error=""
+  current_source=unknown
+  if [ "$CONFIG_PRESENT" -eq 0 ]; then
+    config_state=missing
+    config_error="No saved configuration. Choose a paired speaker and reconnection rule."
+  elif [ "$CONFIG_LOAD_OK" -ne 1 ]; then
+    config_state=invalid
+    config_error="The saved configuration could not be read. Apply setup again."
+  elif [ "${CONFIG_VERSION:-}" != 1 ]; then
+    config_state=invalid
+    config_error="The saved configuration version is unsupported. Apply setup again."
+  else
+    case "$SAVED_MAC" in
+      [[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]]) ;;
+      *) config_state=invalid; config_error="The saved speaker address is invalid. Apply setup again." ;;
+    esac
+    case "$SAVED_MODE" in
+      source)
+        case "$SAVED_KIND" in thunderbolt|usb|adapter) ;; *) config_state=invalid; config_error="The saved source kind is invalid. Apply setup again." ;; esac
+        if [ "${#SAVED_KEY}" -ne 64 ]; then config_state=invalid; config_error="The saved source key is invalid. Apply setup again."
+        else case "$SAVED_KEY" in *[!0-9a-f]*) config_state=invalid; config_error="The saved source key is invalid. Apply setup again." ;; esac; fi
+        ;;
+      any_power|disconnect_only) ;;
+      *) config_state=invalid; config_error="The saved reconnection rule is invalid. Apply setup again." ;;
+    esac
+  fi
+
+  current_power="$(/usr/bin/pmset -g ps 2>/dev/null | /usr/bin/head -n 1 || true)"
+  case "$current_power" in
+    *"'AC Power'"*) current_power=ac ;;
+    *"'Battery Power'"*) current_power=battery ;;
+    *) current_power=unknown ;;
+  esac
+  if [ "$config_state" = valid ]; then
+    if [ "$SAVED_MODE" = source ]; then current_source="$(source_presence "$SAVED_KIND" "$SAVED_KEY")"
+    else current_source=not_applicable; fi
+  fi
+
+  status_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/uncordex-gui-status.XXXXXX")" || exit 1
+  trap '[ -z "${status_file:-}" ] || /bin/rm -f "$status_file"' EXIT HUP INT TERM
+  "$PLUTIL" -create xml1 "$status_file"
+  "$PLUTIL" -insert schema -integer 1 "$status_file"
+  "$PLUTIL" -insert config_state -string "$config_state" "$status_file"
+  "$PLUTIL" -insert config_error -string "$config_error" "$status_file"
+  "$PLUTIL" -insert device_address -string "$SAVED_MAC" "$status_file"
+  "$PLUTIL" -insert configured_blueutil_path -string "$SAVED_BLUEUTIL" "$status_file"
+  "$PLUTIL" -insert detected_blueutil_path -string "$BLUEUTIL_PATH" "$status_file"
+  if [ -n "$BLUEUTIL_PATH" ]; then "$PLUTIL" -insert blueutil_available -bool true "$status_file"
+  else "$PLUTIL" -insert blueutil_available -bool false "$status_file"; fi
+  "$PLUTIL" -insert reconnect_mode -string "$SAVED_MODE" "$status_file"
+  "$PLUTIL" -insert source_kind -string "$SAVED_KIND" "$status_file"
+  "$PLUTIL" -insert source_key -string "$SAVED_KEY" "$status_file"
+  "$PLUTIL" -insert source_label -string "$SAVED_LABEL" "$status_file"
+  "$PLUTIL" -insert current_power -string "$current_power" "$status_file"
+  "$PLUTIL" -insert current_source -string "$current_source" "$status_file"
+  /bin/cat "$status_file"
+  /bin/rm -f "$status_file"
+  trap - EXIT HUP INT TERM
+}
+
+if [ "$GUI_STATUS_PLIST" -eq 1 ]; then
+  print_gui_status_plist
+  exit 0
+fi
+
+[ "$CONFIG_LOAD_OK" -eq 1 ] || fail "the saved configuration could not be read; choose a new setup explicitly"
 
 if [ -z "$REQUESTED_MAC" ]; then
   if [ -n "$SAVED_MAC" ] && [ "$RELEARN" -eq 0 ]; then
@@ -252,6 +332,7 @@ case "$SELECTED_MODE" in
 esac
 
 if [ -z "$BLUEUTIL_PATH" ] && [ "$DRY_RUN" -eq 0 ]; then
+  [ "$NO_INSTALL_DEPENDENCIES" -eq 0 ] || fail "blueutil is required; install it with Homebrew: brew install blueutil"
   BREW="${UNCORDEX_BREW:-$(command -v brew 2>/dev/null || true)}"
   [ -n "$BREW" ] && [ -x "$BREW" ] || fail "Homebrew is required to install blueutil: https://brew.sh"
   "$BREW" install blueutil

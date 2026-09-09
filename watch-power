@@ -518,6 +518,34 @@ show_status() {
     "window deadline: $WINDOW_DEADLINE"
 }
 
+show_status_plist() {
+  local status_file state_valid observed_at
+  state_valid=false
+  observed_at=0
+  if load_state; then
+    state_valid=true
+    observed_at="$(/usr/bin/stat -f %m "$STATE_FILE" 2>/dev/null || /usr/bin/printf '0')"
+  else
+    watcher_reset_runtime
+  fi
+  status_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/uncordex-watcher-status.XXXXXX")" || return 1
+  trap '[ -z "${status_file:-}" ] || /bin/rm -f "$status_file"' EXIT HUP INT TERM
+  /usr/bin/plutil -create xml1 "$status_file"
+  /usr/bin/plutil -insert schema -integer 1 "$status_file"
+  /usr/bin/plutil -insert state_valid -bool "$state_valid" "$status_file"
+  /usr/bin/plutil -insert observed_at -integer "$observed_at" "$status_file"
+  /usr/bin/plutil -insert phase -string "$PHASE" "$status_file"
+  /usr/bin/plutil -insert attempts -integer "$ATTEMPTS" "$status_file"
+  /usr/bin/plutil -insert next_attempt -integer "$NEXT_ATTEMPT" "$status_file"
+  /usr/bin/plutil -insert window_deadline -integer "$WINDOW_DEADLINE" "$status_file"
+  /usr/bin/plutil -insert last_power -string "$LAST_POWER" "$status_file"
+  /usr/bin/plutil -insert last_source -string "$LAST_SOURCE" "$status_file"
+  /usr/bin/plutil -insert departure_observed -bool "$([ "$DEPARTURE_OBSERVED" -eq 1 ] && /usr/bin/printf true || /usr/bin/printf false)" "$status_file"
+  /bin/cat "$status_file"
+  /bin/rm -f "$status_file"
+  trap - EXIT HUP INT TERM
+}
+
 watcher_main() {
   local now
   SCRIPT_DIR="$(cd "$(/usr/bin/dirname "$0")" && pwd)"
@@ -531,7 +559,8 @@ watcher_main() {
   BOOT_ID="$(compute_boot_id)" || { log_error "Could not determine the current boot identity"; return 1; }
   STATE_BINDING="$(compute_binding)" || { log_error "Could not bind runtime state to this rule"; return 1; }
   if [ "${1:-}" = --status ]; then show_status; return 0; fi
-  if [ -n "${1:-}" ]; then log_error "Usage: $0 [--status]"; return 64; fi
+  if [ "${1:-}" = --status-plist ]; then show_status_plist; return 0; fi
+  if [ -n "${1:-}" ]; then log_error "Usage: $0 [--status|--status-plist]"; return 64; fi
   if ! load_state; then watcher_reset_runtime; log_event "Starting with a fresh baseline; no restore permission inferred"
   else log_event "Restored same-boot watcher state: $PHASE"; fi
   while true; do
