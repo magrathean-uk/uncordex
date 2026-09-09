@@ -2,6 +2,10 @@
 
 `Uncordex.app` is a native AppKit controller for the existing per-user watcher. It targets macOS 13.0, contains universal arm64 and x86_64 executable slices, and keeps `blueutil` as an external Homebrew dependency.
 
+The approved paper-cut icon is stored as `icon/appicon-paper-cut.png` for repository presentation and `icon/Uncordex.icns` for the application bundle. The PNG has transparent corners around the rounded app-icon shape.
+
+For installation and first setup, see [Installation](installation.md). For the signed product archive, see [macOS installer package](pkg.md).
+
 ## Build
 
 The build script defaults every product, cache, temporary file, and log to `$HOME/dev/build/uncordex/gui/`:
@@ -78,4 +82,6 @@ When `blueutil` is absent, the app shows `brew install blueutil` and disables ac
 
 ## Acceptance boundary
 
-The simulated suites and fixture rendering do not operate Bluetooth devices or the logged-in user's LaunchAgent. Universal slices and deployment metadata demonstrate build configuration, not runtime acceptance on an actual macOS 13 machine. Physical discovery, disconnect, and restoration remain separate acceptance work.
+The simulated suites and fixture rendering do not operate Bluetooth devices or the logged-in user's LaunchAgent. Universal slices and deployment metadata demonstrate build configuration, not runtime acceptance on an actual macOS 13 machine.
+
+The recorded [live acceptance run](testing/2026-09-09-live-acceptance.md) verified the installed app, one real LaunchAgent, one Bose speaker, and one ASUS Thunderbolt source on the development Mac. Other hardware, macOS 13 runtime behavior, Intel runtime behavior, sleep/wake, and reboot/login remain separate checks.

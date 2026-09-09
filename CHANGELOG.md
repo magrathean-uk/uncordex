@@ -10,3 +10,4 @@
 - Added fixture and simulated acceptance coverage for hardware, watcher, and installer behavior.
 - Added a native AppKit controller with Overview, Speaker & Rule, and Diagnostics views.
 - Added a script-free macOS Installer package that installs the universal app in `/Applications`.
+- Updated the public documentation around app-first setup, package boundaries, live acceptance, and the rounded paper-cut icon.

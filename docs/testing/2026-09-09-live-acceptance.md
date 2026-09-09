@@ -1,6 +1,6 @@
 # Live hardware test — 2026-09-09
 
-Tested the real GUI with Bose SoundLink Max and ASUS PA32UCDM over Thunderbolt. User authorized pausing the legacy watcher and installing/starting Uncordex. At the time of this hardware run, no source commit or push had been performed.
+Tested the real GUI with Bose SoundLink Max and ASUS PA32UCDM over Thunderbolt. User authorized pausing the legacy watcher and installing and starting Uncordex. The hardware cycle occurred before source publication; the tested app and package implementation was later committed as `2576d4431e8cda36cac5cbd6fafe06cf18af4c90` and pushed to `main`.
 
 ## Results
 
@@ -28,10 +28,16 @@ Evidence sources: `~/Library/Logs/uncordex.log`, `~/Library/Logs/uncordex-error.
 
 ## Package installation acceptance
 
-The signed `Uncordex-1.0.0.pkg` was installed on this Mac with the native command-line Installer. Installer completed successfully and registered receipt `uk.magrathean.uncordex.pkg` at version 1.0.0. The package placed `/Applications/Uncordex.app` on disk.
+The final signed `Uncordex-1.0.0.pkg` was installed on this Mac with the native command-line Installer. Installer completed successfully and registered receipt `uk.magrathean.uncordex.pkg` at version 1.0.0. The package placed `/Applications/Uncordex.app` on disk. Its SHA-256 is `cad60ac1a27f3475468a44ffca3a19ee18580af305d76965236ed577f7159167`.
 
 The installed app passed strict code-signature validation with the Developer ID Application identity for team `4AA2EMZ2HA`. Its executable contains arm64 and x86_64 slices, its bundle version is 1.0.0, and its minimum system version is macOS 13.0. The installed app launched outside demo mode and showed the saved Bose/ASUS setup and the live watcher as Running.
 
 The watcher PID was 55505 immediately before and after package installation. This confirms the observed install did not restart the existing per-user service. Quitting the installed GUI also left that service running.
 
 The package is Developer ID signed with a trusted timestamp but, by user choice, was not submitted to Apple for notarization.
+
+## Final simulated verification
+
+After the GUI status parser and package payload fixes, the final implementation passed 113 service tests, 22 native-app tests, and 3 package tests. Bash syntax validation, ShellCheck, strict app signature validation, package signature inspection, local Markdown-link checks, and the absence of AppleDouble or `.DS_Store` payload files also passed.
+
+These checks support the recorded implementation and package. They do not widen the one-host hardware evidence described above.

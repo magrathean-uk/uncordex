@@ -63,12 +63,16 @@ Do not delete the backup or old files yet.
 
 ## 4. Install and accept Uncordex
 
+With the native app, open **Speaker & Rule**, select the speaker and saved source, review **Preview**, then select **Save & Start**. With a source checkout, run:
+
 ```bash
 ./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY
 launchctl print "gui/$(id -u)/uk.magrathean.uncordex.watch-power"
 ```
 
-Perform a deliberate physical disconnect and restoration check with the actual dock/charger and speaker. The simulated suite cannot establish this acceptance.
+Confirm that the legacy label remains unloaded. Its property list can start it again at a future login unless you deliberately disable or remove that legacy installation.
+
+Perform a deliberate physical disconnect and restoration check with the actual dock or charger and speaker. The simulated suite cannot establish this acceptance.
 
 If installation fails before activation, restart the preserved legacy service using its backed-up plist:
 

@@ -1,33 +1,64 @@
-# Uncordex
+<p align="center">
+  <img src="icon/appicon-paper-cut.png" width="180" alt="Rounded Uncordex app icon showing a power plug and wireless signal">
+</p>
 
-Uncordex is a per-user macOS service that disconnects one Bluetooth speaker when a saved desk setup departs, then restores only the connection it previously disconnected.
+<h1 align="center">Uncordex</h1>
 
-It uses [blueutil](https://github.com/toy/blueutil) and a LaunchAgent. It has no daemon, account, cloud service, telemetry, automatic pairing, Bluetooth-radio control, or audio-output switching.
+<p align="center">
+  A native macOS controller that disconnects one Bluetooth speaker when your saved desk setup departs and restores only the connection it previously disconnected.
+</p>
 
-## Why source-aware
+<p align="center">
+  macOS 13+ · Apple Silicon and Intel · MIT licensed
+</p>
 
-A power transition alone cannot tell one charger or dock from another. During setup, choose one explicit rule:
+Uncordex combines a native AppKit app with a small per-user LaunchAgent. It runs locally, stores its configuration on the Mac, and uses [blueutil](https://github.com/toy/blueutil) to control a speaker that is already paired.
+
+It has no account, cloud service, telemetry, automatic pairing, Bluetooth-radio control, audio-output switching, or system daemon.
+
+## What it does
+
+1. You choose one paired Bluetooth speaker.
+2. You choose when reconnection is allowed: a saved source, any external power, or never.
+3. Uncordex watches power and source identity in the background.
+4. When it confirms a departure, it disconnects the speaker and records that it owns that action.
+5. When the selected setup returns, it reconnects only if that ownership is still valid.
+
+Manual connections and disconnections remain respected. Uncordex does not continually force the speaker into a preferred state.
+
+## Reconnection rules
 
 - **Saved source — recommended:** reconnect only while AC is present and a saved Thunderbolt/USB4 dock, serialized USB hub, or serialized power adapter matches.
-- **Any external power:** reconnect after any battery-to-AC return. Use only when you deliberately accept every charger.
+- **Any external power:** reconnect after any observed battery-to-AC return. Choose this only when every charger is acceptable.
 - **Disconnect only:** disconnect on departure and never reconnect automatically.
 
-A dock rule identifies device presence, not the currently active power cable. If another charger already keeps the Mac on AC, attaching the saved dock can still make restoration eligible. A different charger cannot satisfy a saved-source rule.
+A saved dock is a presence rule. If another charger already keeps the Mac on AC, attaching the saved dock can still make restoration eligible. A different charger cannot satisfy a saved-source rule.
 
 ## Requirements
 
-- macOS with `ioreg`, structured `plutil` extraction, and Bash 3.2 or later.
-- Homebrew and `blueutil`.
-- One speaker already paired with the Mac.
+- macOS 13 or newer.
+- Apple Silicon or Intel Mac.
+- One Bluetooth speaker already paired with the Mac.
 - A logged-in macOS user session.
+- Homebrew and `blueutil`.
 
-Apple Silicon (`/opt/homebrew`) and Intel (`/usr/local`) Homebrew paths are supported.
+Install the external helper with:
 
-## Quick start
+```bash
+brew install blueutil
+```
 
-For a packaged installation, install `Uncordex-1.0.0.pkg`, open Uncordex from Applications, and complete **Speaker & Rule**. See [macOS installer package](docs/pkg.md) for package behavior, validation, and removal.
+## Install the app
 
-For a source installation, first connect the dock or charger you want to save and discover whether macOS exposes a unique identity:
+The macOS package places `Uncordex.app` in `/Applications`. Open the app, select **Speaker & Rule**, choose the paired speaker and reconnection rule, preview the result, then select **Save & Start**.
+
+The package installs only the app. It does not start a service, operate Bluetooth, install Homebrew packages, or change the current user's configuration. Existing configuration, state, logs, and LaunchAgent files are preserved during upgrades.
+
+See [macOS installer package](docs/pkg.md) for building, signing, validation, installation, and removal. The existing GitHub `v1.0.0` release has no installer attached; publishing a downloadable package requires a package built from the matching release commit.
+
+## Install from source
+
+Connect the dock or charger that should qualify restoration, then discover whether macOS exposes a stable identity:
 
 ```bash
 git clone https://github.com/magrathean-uk/uncordex.git
@@ -38,13 +69,13 @@ brew install blueutil
 
 Discovery is read-only. It does not install a service or operate Bluetooth.
 
-For guided installation:
+Start guided setup with the speaker's Bluetooth address:
 
 ```bash
 ./install.sh AA-BB-CC-DD-EE-FF
 ```
 
-For noninteractive installation, choose a rule deliberately:
+For noninteractive setup, choose a rule explicitly:
 
 ```bash
 ./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY
@@ -52,62 +83,63 @@ For noninteractive installation, choose a rule deliberately:
 ./install.sh AA-BB-CC-DD-EE-FF --disconnect-only
 ```
 
-Preview an installation without packages, writes, service changes, or Bluetooth actions:
+Preview a source installation without package installation, persistent writes, service changes, or Bluetooth actions:
 
 ```bash
 ./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY --dry-run
 ```
 
-## How it behaves
+## Background behavior
 
-- Polls power and source identity every five seconds.
-- Requires two valid source observations to confirm a saved source’s disappearance or return.
-- Disconnects a connected speaker on a confirmed AC-to-battery transition. A saved dock disappearing while another charger maintains AC is also a departure.
-- Restores only after Uncordex successfully disconnected and verified that same speaker; manual connections and disconnections remain respected.
-- Attempts at most six reconnections in a five-minute eligible return window, using 5, 10, 20, 40, and 60-second backoff.
-- Fails closed on unknown hardware readings, malformed state, changed rules, and reboot. Same-boot restarts retain a pending retry budget only after fresh observations.
-- Never enables Bluetooth, pairs devices, changes audio output, or continually enforces a connection.
+- Samples power and source identity every five seconds.
+- Requires two valid observations to confirm a saved source's disappearance or return.
+- Disconnects a connected speaker after a confirmed departure.
+- Creates restore permission only after the disconnect succeeds and a fresh query verifies the speaker is disconnected.
+- Attempts at most six reconnections in a five-minute eligible-return window, with bounded backoff.
+- Fails closed on unknown hardware readings, malformed state, changed rules, and reboot.
+- Retains same-boot pending state across a service restart only after fresh observations.
 
 ## Status and removal
 
-Read the rule and current state:
+The app's **Overview** shows service state, saved setup, current power/source readings, and automatic restore state. **Diagnostics** shows cached watcher observations, dependency status, and log access.
+
+The same information is available from the installed service:
 
 ```bash
 ~/.local/share/uncordex/watch-power --status
-```
-
-Inspect the service and logs:
-
-```bash
 launchctl print "gui/$(id -u)/uk.magrathean.uncordex.watch-power"
 tail -f ~/Library/Logs/uncordex.log
 tail -f ~/Library/Logs/uncordex-error.log
 ```
 
-Remove only the canonical Uncordex LaunchAgent:
+Use the app's **Stop** control to stop the service while preserving its files. To stop the canonical LaunchAgent and remove its property list:
 
 ```bash
 ./uninstall.sh
 ```
 
-Application files, configuration, state, backups, and logs remain for recovery or reinstall.
+Removing the app or LaunchAgent leaves configuration, runtime state, backups, and logs available for recovery.
 
 ## Documentation
 
-- [Installation](docs/installation.md)
-- [Usage and operating model](docs/usage.md)
-- [Migrating from older watchers](docs/migration.md)
+- [Install the app or service](docs/installation.md)
+- [Use Uncordex](docs/usage.md)
+- [Native macOS app](docs/app.md)
+- [macOS installer package](docs/pkg.md)
+- [Migrate from older watchers](docs/migration.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
 - [Development and verification](docs/development.md)
-- [macOS installer package](docs/pkg.md)
+- [Release process](docs/releasing.md)
+- [Live hardware and package acceptance](docs/testing/2026-09-09-live-acceptance.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
-- [Release process](docs/releasing.md)
 - [Changelog](CHANGELOG.md)
 - [MIT License](LICENSE)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-## Acceptance boundary
+## Verification boundary
 
-The automated suite uses fixture hardware snapshots and substituted Bluetooth, clock, and LaunchAgent boundaries. A passing suite is simulated evidence; it is not proof that a particular Mac, dock, charger, or Bluetooth speaker will accept a connection. Perform physical acceptance deliberately after installation.
+The automated suites use fixture hardware snapshots and substituted Bluetooth, clock, process, and LaunchAgent boundaries. They verify deterministic behavior without touching the user's devices or service. They do not prove that a particular Mac, dock, charger, or Bluetooth speaker will accept a real connection.
+
+The recorded [live acceptance run](docs/testing/2026-09-09-live-acceptance.md) proves one Bose/ASUS setup on one Mac. macOS 13 runtime compatibility, Intel runtime compatibility, sleep/wake, reboot/login, and other hardware combinations remain separate acceptance work.

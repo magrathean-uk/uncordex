@@ -16,17 +16,24 @@ Thanks for improving Uncordex.
 Write a focused regression test before changing behavior. Run:
 
 ```bash
-bash -n install.sh uninstall.sh watch-power lib/source.sh tests/run.sh
+bash -n \
+  install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
+  app/build.sh app/test.sh \
+  packaging/build.sh packaging/validate.sh packaging/test.sh
 bash tests/run.sh
+bash app/test.sh
 ```
 
 Run ShellCheck when it is already available:
 
 ```bash
-shellcheck install.sh uninstall.sh watch-power lib/source.sh tests/run.sh
+shellcheck \
+  install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
+  app/build.sh app/test.sh \
+  packaging/build.sh packaging/validate.sh packaging/test.sh
 ```
 
-Report simulated verification separately from physical hardware acceptance.
+For package changes, validate a finished artifact with `packaging/test.sh`; package validation does not install it. Report simulated verification, package inspection, and physical hardware acceptance separately.
 
 ## Changes and pull requests
 
