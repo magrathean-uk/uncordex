@@ -1,21 +1,24 @@
-# Security Policy — Unplugged Speaker
+# Security Policy — Uncordex
 
-## Private Reporting
+## Private reporting
 
-Report vulnerabilities through GitHub private vulnerability reporting or email `contact@magrathean.uk` with subject `SECURITY: Unplugged Speaker`.
+Report vulnerabilities through GitHub private vulnerability reporting or email `contact@magrathean.uk` with subject `SECURITY: Uncordex`.
 
-Do not publish credentials, private keys, database dumps, signing certificates, or exploit details.
+Do not publish credentials, private keys, database dumps, signing certificates, or exploit details. Include the affected version or commit, macOS version, hardware topology, reproduction steps, impact, and redacted evidence.
 
-Include affected version/commit, platform, topology, reproduction steps, impact, and redacted evidence.
+## Supported version
 
-## Scope & Safe Harbour
+The current `1.x` release line is supported. Historic pre-Uncordex releases are retained for traceability but do not receive new fixes.
 
-Magrathean UK Ltd. will not pursue a good-faith researcher for security disclosures that:
-- Target non-production test systems or researcher-owned environments;
-- Avoid persistence, destructive changes, denial of service, and access to personal or customer data;
-- Report promptly and permit reasonable time for remediation;
-- Do not condition non-disclosure on financial compensation.
+## Scope and safe harbour
 
-## Excluded Conduct
+Magrathean UK Ltd. will not pursue a good-faith researcher for disclosures that:
+
+- target non-production test systems or researcher-owned environments;
+- avoid persistence, destructive changes, denial of service, and access to personal or customer data;
+- report promptly and allow reasonable time for remediation; and
+- do not condition non-disclosure on financial compensation.
+
+## Excluded conduct
 
 No safe harbour covers phishing, credential stuffing, accessing private production infrastructure, large-scale scanning, denial of service, or unlawful conduct.

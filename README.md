@@ -1,110 +1,110 @@
-# Unplugged Speaker
+# Uncordex
 
-A small per-user macOS service that disconnects one Bluetooth speaker when the Mac switches to battery power and reconnects it when AC power returns.
+Uncordex is a per-user macOS service that disconnects one Bluetooth speaker when a saved desk setup departs, then restores only the connection it previously disconnected.
 
-It uses [`blueutil`](https://github.com/toy/blueutil) for Bluetooth control and a `launchd` agent for automatic startup after login. No daemon, cloud service, account, or telemetry is involved.
+It uses [blueutil](https://github.com/toy/blueutil) and a LaunchAgent. It has no daemon, account, cloud service, telemetry, automatic pairing, Bluetooth-radio control, or audio-output switching.
 
-## Behaviour
+## Why source-aware
 
-- Polls the macOS power source every five seconds.
-- Disconnects the configured speaker on the transition to battery power.
-- Reconnects it on the transition to AC power.
-- Retries reconnection up to three times, five seconds apart.
-- Stores only the speaker address, resolved `blueutil` path, and last observed power source.
+A power transition alone cannot tell one charger or dock from another. During setup, choose one explicit rule:
+
+- **Saved source — recommended:** reconnect only while AC is present and a saved Thunderbolt/USB4 dock, serialized USB hub, or serialized power adapter matches.
+- **Any external power:** reconnect after any battery-to-AC return. Use only when you deliberately accept every charger.
+- **Disconnect only:** disconnect on departure and never reconnect automatically.
+
+A dock rule identifies device presence, not the currently active power cable. If another charger already keeps the Mac on AC, attaching the saved dock can still make restoration eligible. A different charger cannot satisfy a saved-source rule.
 
 ## Requirements
 
-- macOS.
-- Homebrew.
-- A Bluetooth speaker that is already paired with the Mac.
-- A per-user login session; the service is not a system daemon.
+- macOS with `ioreg`, structured `plutil` extraction, and Bash 3.2 or later.
+- Homebrew and `blueutil`.
+- One speaker already paired with the Mac.
+- A logged-in macOS user session.
 
-Both Apple Silicon (`/opt/homebrew`) and Intel (`/usr/local`) Homebrew installations are supported.
+Apple Silicon (`/opt/homebrew`) and Intel (`/usr/local`) Homebrew paths are supported.
 
-## Install
+## Quick start
+
+First, connect the dock or charger you want to save and discover whether macOS exposes a unique identity:
 
 ```bash
+git clone https://github.com/magrathean-uk/uncordex.git
+cd uncordex
 brew install blueutil
-git clone https://github.com/magrathean-uk/unplugged-speaker.git
-cd unplugged-speaker
-blueutil --paired
+./install.sh --discover
+```
+
+Discovery is read-only. It does not install a service or operate Bluetooth.
+
+For guided installation:
+
+```bash
 ./install.sh AA-BB-CC-DD-EE-FF
 ```
 
-Replace `AA-BB-CC-DD-EE-FF` with the paired speaker's Bluetooth address. Colons or hyphens are accepted.
-
-The installer validates the address, resolves the installed `blueutil` binary, writes the local configuration, installs the watcher, validates the generated property list, and starts the LaunchAgent.
-
-Re-running `install.sh` updates the configured speaker and installed watcher.
-
-## Verify
-
-Check the service:
+For noninteractive installation, choose a rule deliberately:
 
 ```bash
-launchctl print "gui/$(id -u)/com.unplugged-speaker.watch-power"
+./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY
+./install.sh AA-BB-CC-DD-EE-FF --any-power
+./install.sh AA-BB-CC-DD-EE-FF --disconnect-only
 ```
 
-Follow its logs:
+Preview an installation without packages, writes, service changes, or Bluetooth actions:
 
 ```bash
-tail -f ~/Library/Logs/unplugged-speaker.log
-tail -f ~/Library/Logs/unplugged-speaker-error.log
+./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY --dry-run
 ```
 
-Test the Bluetooth address directly:
+## How it behaves
+
+- Polls power and source identity every five seconds.
+- Requires two valid source observations to confirm a saved source’s disappearance or return.
+- Disconnects a connected speaker on a confirmed AC-to-battery transition. A saved dock disappearing while another charger maintains AC is also a departure.
+- Restores only after Uncordex successfully disconnected and verified that same speaker; manual connections and disconnections remain respected.
+- Attempts at most six reconnections in a five-minute eligible return window, using 5, 10, 20, 40, and 60-second backoff.
+- Fails closed on unknown hardware readings, malformed state, changed rules, and reboot. Same-boot restarts retain a pending retry budget only after fresh observations.
+- Never enables Bluetooth, pairs devices, changes audio output, or continually enforces a connection.
+
+## Status and removal
+
+Read the rule and current state:
 
 ```bash
-blueutil --is-connected AA-BB-CC-DD-EE-FF
-blueutil --disconnect AA-BB-CC-DD-EE-FF
-blueutil --connect AA-BB-CC-DD-EE-FF
+~/.local/share/uncordex/watch-power --status
 ```
 
-## Installed files
+Inspect the service and logs:
 
-| Purpose | Path |
-| --- | --- |
-| LaunchAgent | `~/Library/LaunchAgents/com.unplugged-speaker.watch-power.plist` |
-| Watcher | `~/.local/share/unplugged-speaker/watch-power` |
-| Configuration | `${XDG_CONFIG_HOME:-~/.config}/unplugged-speaker/config` |
-| Last power state | `${XDG_STATE_HOME:-~/.local/state}/unplugged-speaker/last-power` |
-| Standard output | `~/Library/Logs/unplugged-speaker.log` |
-| Standard error | `~/Library/Logs/unplugged-speaker-error.log` |
+```bash
+launchctl print "gui/$(id -u)/uk.magrathean.uncordex.watch-power"
+tail -f ~/Library/Logs/uncordex.log
+tail -f ~/Library/Logs/uncordex-error.log
+```
 
-The installer records the exact `blueutil` path in the configuration. Set `BLUEUTIL=/absolute/path/to/blueutil` there only when overriding it intentionally.
-
-## Remove
+Remove only the canonical Uncordex LaunchAgent:
 
 ```bash
 ./uninstall.sh
 ```
 
-That stops the service and removes the LaunchAgent. It deliberately leaves the copied watcher, configuration, state, and logs in place.
+Application files, configuration, state, backups, and logs remain for recovery or reinstall.
 
-To purge those as well:
+## Documentation
 
-```bash
-rm -rf ~/.local/share/unplugged-speaker
-rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/unplugged-speaker"
-rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/unplugged-speaker"
-rm -f ~/Library/Logs/unplugged-speaker.log
-rm -f ~/Library/Logs/unplugged-speaker-error.log
-```
+- [Installation](docs/installation.md)
+- [Usage and operating model](docs/usage.md)
+- [Migrating from older watchers](docs/migration.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Architecture](docs/architecture.md)
+- [Development and verification](docs/development.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Release process](docs/releasing.md)
+- [Changelog](CHANGELOG.md)
+- [MIT License](LICENSE)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-## Troubleshooting
+## Acceptance boundary
 
-If reconnection fails, first confirm the speaker is powered on, in range, paired, and manually connectable with `blueutil`. Then inspect the error log and the stored `BLUEUTIL` path.
-
-If the service is not loaded, run the installer again rather than hand-editing the property list. The installer performs `plutil` validation and replaces the existing per-user service safely.
-
-This project reacts to AC/battery source changes. It is not a general Bluetooth reliability manager and does not attempt to manage sleep, wake, audio routing, multiple speakers, or competing connections from other devices.
-
-## Development check
-
-```bash
-bash -n install.sh uninstall.sh watch-power
-```
-
-## Security and licence
-
-Report security issues through [`SECURITY.md`](./SECURITY.md). The code is licensed under the [MIT Licence](./LICENSE). Third-party notices are recorded in [`license.md`](./license.md).
+The automated suite uses fixture hardware snapshots and substituted Bluetooth, clock, and LaunchAgent boundaries. A passing suite is simulated evidence; it is not proof that a particular Mac, dock, charger, or Bluetooth speaker will accept a connection. Perform physical acceptance deliberately after installation.
