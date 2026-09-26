@@ -1,39 +1,32 @@
-# Project instructions
+# Uncordex development guidance
 
-## Work style
+## Project boundaries
 
-- Infer routine intent from the request and repository context. Complete authorized, reversible work without repeatedly asking for confirmation.
-- User instructions take precedence over skill guidance. If an instruction file or skill makes you pause or leave requested work unfinished, name the exact file and rule.
-- Lead with the result. Use concise, plain language and only enough formatting to make the answer easy to scan.
-- Match reasoning, tests, and verification to the risk of the change. Run the focused checks once after the final edit; broaden them only when a failure or unresolved risk justifies it.
-- Use subagents only when the user explicitly authorizes them and the work can be split into independent tasks.
-
-These practices follow the [GPT-6 Astra prompting guidance](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices), reviewed 2026-09-09.
-
-## Repository map
-
-- `install.sh`: validates setup, learns a power-source rule, and manages the per-user LaunchAgent.
-- `watch-power`: observes power/source state and owns Bluetooth disconnect/restore decisions.
-- `lib/source.sh`: reads and matches stable macOS hardware identities.
-- `uninstall.sh`: stops the canonical LaunchAgent and leaves configuration, state, and logs.
-- `tests/run.sh`: runs simulated hardware and service tests without touching the user's Bluetooth devices or LaunchAgents.
-
-## Safety and scope
-
+- Uncordex is a local macOS app and per-user LaunchAgent for one already-paired Bluetooth speaker. Keep the app, source scripts, and packaged service behavior aligned.
 - Preserve unrelated and untracked work. Never edit `.serena/`.
-- Source changes, local commits, installation, publishing, tags, and GitHub releases are separate actions.
-- `install.sh` and `uninstall.sh` affect the logged-in user's real service. Do not run them during automated tests or ordinary source verification.
-- Do not connect or disconnect real Bluetooth devices during automated tests. Substitute the external power, hardware, Bluetooth, clock, sleep, and LaunchAgent boundaries.
-- Do not add telemetry, accounts, cloud services, automatic Bluetooth pairing, or Bluetooth-radio toggling.
-- Keep scripts compatible with macOS Bash 3.2 and both Apple Silicon and Intel Homebrew paths.
+- Keep shell scripts compatible with macOS Bash 3.2 and both Apple Silicon and Intel Homebrew paths.
+- Do not add telemetry, accounts, cloud services, automatic Bluetooth pairing, Bluetooth-radio control, audio-output switching, or a privileged daemon.
 
-## Verification
+## Safe development
 
-Run:
+- `install.sh` and `uninstall.sh` change the logged-in user's real service. Do not run either as an ordinary source check.
+- Source setup can ask Homebrew to install `blueutil`. The app uses `--no-install-dependencies`, and the package does not install Homebrew packages. Keep this distinction explicit in product and security documentation.
+- Automated checks must not operate real Bluetooth devices or a real LaunchAgent. Use the existing substituted hardware, Bluetooth, time, sleep, and LaunchAgent boundaries.
+- Keep source identity matching fail-closed. Missing, duplicate, malformed, or unreadable hardware data must not become a broad match.
+- Preserve the watcher ownership rule: it may restore only a connection it previously disconnected and verified.
+- Keep configuration and runtime state private to the current user. Do not expose device addresses, source keys, logs, credentials, or user paths in fixtures, documentation, or pull requests.
+
+## Validation
+
+For behavior changes, run the smallest relevant checks first. The core service checks are:
 
 ```bash
 bash -n install.sh uninstall.sh watch-power lib/source.sh tests/run.sh
 bash tests/run.sh
 ```
 
-Run `shellcheck install.sh uninstall.sh watch-power lib/source.sh tests/run.sh` when ShellCheck is already installed. Report simulated verification separately from physical hardware acceptance.
+For app changes, run `bash app/test.sh`. For package changes, validate the finished artifact with `packaging/test.sh`. Run ShellCheck over changed shell entry points only when it is already installed. Report simulated checks, package inspection, and physical hardware acceptance separately.
+
+## Delivery
+
+Keep changes small and focused. Historical records in `docs/plans/` and `docs/superpowers/` are not current task gates. Within existing authorization, continue safe, reversible local work without a fresh approval. Installation, signing, notarization, publishing, tags, releases, and live-service changes require authorization for that action. See `CONTRIBUTING.md` and `docs/development.md` for the full command matrix and evidence boundary.

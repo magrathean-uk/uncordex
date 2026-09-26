@@ -1,59 +1,59 @@
 # Installation
 
-Uncordex can be installed as a native app or directly from source. Both paths configure the same per-user LaunchAgent and watcher. The app is the normal interactive path; the source installer remains available for review, automation, and recovery.
+Uncordex can be installed as a native app or from a source checkout. The app provides the interactive setup. Both paths use a per-user LaunchAgent and the same watcher.
 
 ## Requirements
 
 - macOS 13 or newer on Apple Silicon or Intel.
-- One logged-in macOS user session.
-- One Bluetooth speaker already paired with the Mac.
+- A logged-in macOS user session.
+- A Bluetooth speaker already paired with the Mac.
 - Homebrew and [blueutil](https://github.com/toy/blueutil).
 
-Install the external helper first:
+Install `blueutil` before setup:
 
 ```bash
 brew install blueutil
 ```
 
-Uncordex does not bundle `blueutil`. It does not install a system daemon, pair devices, toggle the Bluetooth radio, or select an audio output.
+The app and package do not bundle or install `blueutil`. The source installer can install it with Homebrew when needed; pass `--no-install-dependencies` to prevent that and receive setup guidance instead. Uncordex does not pair devices, toggle the Bluetooth radio, select an audio output, or install a system daemon.
 
 ## Install the native app
 
-Install `Uncordex-<version>.pkg`. The package places `Uncordex.app` in `/Applications` and registers receipt `uk.magrathean.uncordex.pkg`.
+Build the app and package from source using [package guidance](pkg.md), or use a published artifact whose release notes identify it and state its signing status. Install the package, then open Uncordex from `/Applications`. The package places `Uncordex.app` in that directory and registers receipt `uk.magrathean.uncordex.pkg`.
 
-The package is script-free. Installation alone does not launch the app, start a LaunchAgent, operate Bluetooth, install dependencies, or create per-user configuration. Open Uncordex after installation and use **Speaker & Rule**:
+Package installation alone does not launch the app, start a LaunchAgent, control Bluetooth, install dependencies, or create per-user configuration. In the app:
 
-1. Select **Find Devices & Sources** to list paired speakers and discover stable power sources.
-2. Choose the speaker or enter its Bluetooth address.
+1. Open **Speaker & Rule** and select **Find Devices & Sources**.
+2. Choose a paired speaker or enter its Bluetooth address.
 3. Choose **Saved source**, **Any external power**, or **Disconnect only**.
-4. Select **Preview** and read the exact behavior.
-5. Select **Save & Start** to write the per-user files and start the canonical service.
+4. Select **Preview** and review the described behavior.
+5. Select **Save & Start** to save per-user files and start the canonical service.
 
-An empty setup never defaults to the broad any-power rule. If `blueutil` is unavailable, the app explains how to install it and does not invoke Homebrew itself.
+An empty setup has no default reconnection rule. If `blueutil` is missing, the app gives installation guidance and does not invoke Homebrew.
 
-See [macOS installer package](pkg.md) for build, signature, and package validation details.
+See [package details](pkg.md) for package build, signature, validation, and removal information.
 
-## Discover a source from the command line
+## Discover a source from a checkout
 
-From a source checkout, connect the dock or charger that should qualify restoration, then run:
+Connect the dock or charger that should qualify restoration, then run:
 
 ```bash
 ./install.sh --discover
 ```
 
-Discovery prints each usable source as an index, kind, friendly label, and opaque key. It is read-only: it does not install a LaunchAgent, write configuration, install a package, or connect or disconnect a speaker.
+Discovery prints usable candidates with an index, kind, label, and opaque key. It does not install a LaunchAgent, write configuration, install a package, or connect or disconnect a speaker.
 
-An exact saved source needs one of:
+An exact saved source requires one of:
 
 - an external Thunderbolt/USB4 switch UID;
 - a USB hub with vendor ID, product ID, and a non-placeholder serial; or
-- a power-adapter serial plus a stable family code.
+- a power-adapter serial and stable family code.
 
-Names, wattage, voltage, ports, negotiated power, and the Mac battery serial are not identities. Missing, duplicate, malformed, or unreadable identity data fails closed. If no exact identity is available, deliberately choose any-power or disconnect-only behavior.
+Names, wattage, voltage, ports, negotiated power, and the Mac battery serial are not identities. Missing, duplicate, malformed, or unreadable identity data is not treated as a match. If macOS cannot provide a stable identity, choose any-power or disconnect-only deliberately.
 
-## Configure from the command line
+## Configure from a checkout
 
-Guided setup lists paired Bluetooth devices, discovers eligible sources, previews the choice, and saves it:
+Guided setup discovers paired devices, offers eligible sources, previews the choice, and saves it:
 
 ```bash
 ./install.sh AA-BB-CC-DD-EE-FF
@@ -67,17 +67,17 @@ For noninteractive setup, provide exactly one rule:
 ./install.sh AA-BB-CC-DD-EE-FF --disconnect-only
 ```
 
-A first noninteractive installation without a rule fails. Preview the operation without persistent changes with:
+A first noninteractive installation without a rule fails. Preview without persistent changes using:
 
 ```bash
 ./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY --dry-run
 ```
 
-A dry run validates and stages the watcher, source library, configuration, and property list in a temporary directory. It does not install dependencies, create persistent files, stop or load a service, or operate Bluetooth.
+The dry run stages and validates files in a temporary directory. It does not install dependencies, create persistent files, stop or load a service, or operate Bluetooth.
 
-## Update an existing installation
+## Update an installation
 
-Installing a newer package replaces only `/Applications/Uncordex.app`. It preserves the current user's configuration, runtime state, logs, backups, and LaunchAgent. Open the new app and select **Save & Start** when you want the running service files updated from the new bundle.
+Installing a newer package replaces only `/Applications/Uncordex.app`. It preserves per-user configuration, runtime state, logs, backups, and LaunchAgent files. Open the updated app and select **Save & Start** when you want its bundled service files applied to the running installation.
 
 Running `install.sh` again preserves a valid saved rule. To choose another rule interactively, use:
 
@@ -85,9 +85,9 @@ Running `install.sh` again preserves a valid saved rule. To choose another rule 
 ./install.sh AA-BB-CC-DD-EE-FF --relearn
 ```
 
-The source installer validates every staged artifact before stopping the canonical service. It backs up prior Uncordex artifacts and restores them if copying or LaunchAgent activation fails.
+The source installer validates staged artifacts before stopping the canonical service. It backs up prior Uncordex files and restores them if copying or LaunchAgent activation fails.
 
-## Installed layout
+## Installed paths
 
 | Purpose | Path or identifier |
 | --- | --- |
@@ -102,4 +102,4 @@ The source installer validates every staged artifact before stopping the canonic
 | Standard log | `~/Library/Logs/uncordex.log` |
 | Error log | `~/Library/Logs/uncordex-error.log` |
 
-Read [migration](migration.md) before replacing an older speaker watcher. Two controllers must not operate the same speaker.
+Read [migration](migration.md) before replacing an older watcher. Two controllers must not operate the same speaker.

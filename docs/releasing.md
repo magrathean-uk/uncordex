@@ -1,84 +1,27 @@
 # Releasing
 
-Source publication, tag creation, package signing, notarization, and uploading a GitHub release asset are separate actions. Perform only the actions approved for that release, and keep every artifact tied to one immutable commit.
+Keep each distributed artifact tied to one immutable source commit. Source publication, tagging, signing, notarization, installation, and uploading assets are separate actions. Carry out the actions authorized for the release without repeating already-resolved approval questions.
 
-## Prepare the source
+## Prepare
 
-1. Update `VERSION` and `CHANGELOG.md`.
-2. Confirm the MIT `LICENSE` and [third-party notices](../THIRD_PARTY_NOTICES.md) remain accurate.
-3. Confirm the app bundle and package metadata derive the same version from `VERSION`.
-4. Run the full source verification:
+1. Update `VERSION` and `CHANGELOG.md`. Confirm app and package metadata derive that version.
+2. Check [licensing](licensing.md), the complete `LICENSE`, and [third-party notices](../THIRD_PARTY_NOTICES.md) against the material being distributed.
+3. Run the relevant [development checks](development.md), including the service and app suites for a release. Inspect fixture visuals for UI changes.
+4. Review the diff and documentation links. Exclude credentials, local account details, device identifiers, logs, `.serena/`, generated output, and unrelated changes.
+5. Record the tested commit and any physical acceptance limits. Commit and publish the verified source when those actions are authorized.
 
-```bash
-bash -n \
-  install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh \
-  packaging/build.sh packaging/validate.sh packaging/test.sh
-bash tests/run.sh
-bash app/test.sh
-```
+## Tag and package
 
-Run ShellCheck when it is installed:
+Create a new tag on the verified release commit. Do not move an existing public tag or use an old tag for newer app/package source. The tag, `VERSION`, release notes, and artifact must describe the same source tree.
 
-```bash
-shellcheck \
-  install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh \
-  packaging/build.sh packaging/validate.sh packaging/test.sh
-```
+Follow [Packaging](pkg.md) for building and validating the exact distribution artifact. Record its SHA-256, signing result, and notarization result. An unsigned development package, a Developer ID signed package, and a notarized package are different results. Report the one actually verified.
 
-5. Inspect `git diff --check`, local Markdown links, and the intended release tree. Exclude `.serena/`, build output, credentials, logs, device identifiers, and unrelated work.
-6. Commit and push the verified source before creating a tag.
+If installation acceptance is part of the release, test the exact artifact on the intended host with authorization for service and hardware changes. Keep that result separate from archive validation and simulated tests.
 
-## Tag the release
+## Publish and check
 
-Create the annotated tag from the exact verified release commit:
+Release notes should state the user-visible changes, source commit, checks, hardware limits, and signing/notarization status. Include the package SHA-256 for any installer asset. Upload only an artifact built from the tagged source.
 
-```bash
-git tag -a vX.Y.Z -m "Uncordex X.Y.Z"
-git push origin vX.Y.Z
-```
+Read back the published tag target, release body, assets, and public links. Retrieve the published installer and compare its hash and signature with the verified artifact. A successful upload alone does not establish installation or hardware acceptance.
 
-Never move an existing public tag to include later work. If a published tag does not contain the intended app or package source, prepare a new patch or minor version.
-
-## Build a distribution package
-
-Use matching Developer ID identities with the tagged source:
-
-```bash
-UNCORDEX_APP_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" \
-UNCORDEX_INSTALLER_SIGN_IDENTITY="Developer ID Installer: Name (TEAMID)" \
-packaging/build.sh
-```
-
-Signing credentials remain outside the repository. Record the package SHA-256 printed by the build.
-
-Notarization is optional only when the approved release scope says so. For a notarized release, configure the documented `notarytool` credentials before building; the build waits for acceptance, staples the ticket, and validates it. Do not describe a signed-only package as notarized.
-
-Validate the exact artifact intended for distribution:
-
-```bash
-UNCORDEX_PKG_UNDER_TEST="$HOME/dev/build/uncordex/pkg/Uncordex-X.Y.Z.pkg" \
-UNCORDEX_PKG_REQUIRE_SIGNED=1 \
-packaging/test.sh
-```
-
-Use `UNCORDEX_PKG_REQUIRE_NOTARIZED=1` when notarization is part of the release.
-
-## Publish on GitHub
-
-Create or update the GitHub release only after verifying that its tag targets the source used for the artifact. Release notes should state:
-
-- the concrete user-visible changes;
-- source, app, and package verification results;
-- package signing and notarization status;
-- the package SHA-256 when an installer is attached; and
-- the boundary between simulated checks and physical hardware acceptance.
-
-Uploading a package is a separate publishing action. Do not attach a locally built package to an older tag that lacks its source. Do not enable GitHub CI or claim installation, hardware acceptance, notarization, or deployment without direct evidence.
-
-## Verify publication
-
-Read back the repository default branch, tag target, release body, release assets, license detection, and public URLs. When a package is attached, download or otherwise retrieve the published asset through a clean read path and confirm its hash and signature against the recorded artifact.
-
-Preserve historical tags and release notes as immutable evidence. Correct stale statements in the release body only when the correction does not misrepresent what the tagged source contained.
+Do not add GitHub CI or security automation as part of this process. Preserve historical tags and keep historical release notes accurate about their original source and artifacts.

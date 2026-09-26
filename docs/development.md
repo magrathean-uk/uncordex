@@ -1,84 +1,63 @@
-# Development and verification
+# Development
 
-## Safety boundaries
+Run commands from the repository root on macOS. App checks require the Swift compiler and macOS SDK available through `xcrun`. Package work also uses Apple's signing and Installer tools. Read the scripts before selecting an output directory: app and package scripts replace their designated build or verification directories.
 
-Source changes do not install Uncordex. Do not run `install.sh` or `uninstall.sh` as an ordinary source check. Do not connect or disconnect real Bluetooth hardware or load a real LaunchAgent during automated verification.
+## Boundaries
 
-The service suite substitutes hardware snapshots, Bluetooth state, time, filesystem paths, and LaunchAgent commands. The app suite uses a fake service adapter and harmless local subprocess fixtures. The package validator expands a finished product archive under `$HOME/dev/build` and never installs it.
+Ordinary verification must not change the logged-in user's service or Bluetooth devices. Do not run `install.sh` or `uninstall.sh` directly as a test. The service suite supplies isolated paths and substitutes hardware, Bluetooth, clock, and LaunchAgent commands. The app tests use fake service adapters and local subprocess fixtures.
 
-## Service checks
+Keep Bash 3.2 compatibility, both Homebrew paths, and the project's single-speaker scope. Preserve unrelated work and never edit `.serena/`.
 
-```bash
-bash -n install.sh uninstall.sh watch-power lib/source.sh tests/run.sh
-bash tests/run.sh
-```
+## Choose the checks
 
-## Native app checks
+| Change | Relevant checks |
+| --- | --- |
+| Shell service, source matching, or installer | Shell syntax and `bash tests/run.sh` |
+| App model, process handling, or window behavior | `bash app/test.sh`, which also runs the window tests |
+| App bundle or resources | `bash app/build.sh` and inspect the generated bundle |
+| Package assembly or validation | Build an artifact, then run `packaging/test.sh` with that artifact |
+| UI layout | Inspect fixture screenshots at normal and minimum size, in light and dark appearance |
+| Documentation | Check commands against source, links, and claims against their evidence |
 
-```bash
-app/test.sh
-app/build.sh
-```
-
-The build output is `$HOME/dev/build/uncordex/gui/Uncordex.app`. It must contain arm64 and x86_64 slices, target macOS 13, carry the expected bundle identifier and version, contain the complete Service resources, and pass strict code-signature validation.
-
-For deterministic visual inspection without hardware or LaunchAgent access:
+Check all shell entry points without executing them:
 
 ```bash
-"$HOME/dev/build/uncordex/gui/Uncordex.app/Contents/MacOS/Uncordex" \
-  --demo \
-  --screenshot "$HOME/dev/build/uncordex/gui/visual/window.png"
-```
-
-The `--demo` adapter cannot invoke service scripts, `blueutil`, `launchctl`, or physical hardware. See [native app development](app.md) for page and appearance options.
-
-## Package checks
-
-Build an unsigned local package with:
-
-```bash
-packaging/build.sh
-```
-
-Validate a finished signed package with:
-
-```bash
-UNCORDEX_PKG_UNDER_TEST="$HOME/dev/build/uncordex/pkg/Uncordex-1.0.0.pkg" \
-UNCORDEX_PKG_REQUIRE_SIGNED=1 \
-packaging/test.sh
-```
-
-Package checks inspect the expanded payload, metadata, architectures, resources, executable modes, signatures, installer choices, and absence of scripts or host metadata. They do not install the package. See [package documentation](pkg.md) for signing and notarization variables.
-
-## ShellCheck
-
-When ShellCheck is already installed, run it over every shell entry point:
-
-```bash
-shellcheck \
+bash -n \
   install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
   app/build.sh app/test.sh app/window-test.sh \
   packaging/build.sh packaging/validate.sh packaging/test.sh
 ```
 
-Do not install ShellCheck solely to run this command.
+For shell changes, run ShellCheck over the same files when it is already installed. Do not install it just for this check.
 
-## Coverage and evidence
+## App and package output
 
-The simulated suites cover:
+```bash
+bash tests/run.sh
+bash app/test.sh
+bash app/build.sh
+```
 
-- exact Thunderbolt, USB hub, and adapter identity behavior;
-- malformed and duplicate hardware data failing closed;
-- source-aware, any-power, and disconnect-only rules;
-- owned disconnect/reconnect transitions and manual user actions;
-- bounded retries, restart persistence, and source loss during connection;
-- read-only app status, explicit setup, service start/stop/restart, and failure states;
-- process deadlines, concurrent output, and descendant cleanup;
-- dry runs, staged installation, rollback, and legacy-controller blocks; and
-- package structure, identifiers, resources, modes, and signatures.
+App output defaults to `$HOME/dev/build/uncordex/gui`. `UNCORDEX_BUILD_ROOT` can select another directory under `$HOME/dev/build`; paths with dot components or resolved escapes are rejected. A build creates a universal arm64/x86_64 app targeting macOS 13.0 and signs it ad hoc. See [App development](app.md) for the bundle and fixture interface.
 
-A green simulated suite proves behavior under controlled boundaries. Universal slices and deployment metadata prove build configuration. Neither proves runtime behavior on a specific Mac or physical setup. Record hardware and installation acceptance separately, with observed commands, logs, state, and remaining gaps.
+```bash
+bash packaging/build.sh
+```
 
-## Contribution style
+Without signing identities this produces an unsigned development package. `UNCORDEX_PKG_BUILD_ROOT` defaults to `$HOME/dev/build/uncordex/pkg`. Use the actual version from `VERSION` when selecting an artifact:
 
-Keep scripts compatible with macOS Bash 3.2 and both standard Homebrew paths. Add a focused regression test before changing behavior, verify that it fails for the expected reason, then make the smallest useful change. Preserve unrelated files and never edit `.serena/`.
+```bash
+version="$(cat VERSION)"
+UNCORDEX_PKG_UNDER_TEST="$HOME/dev/build/uncordex/pkg/Uncordex-$version.pkg" \
+  bash packaging/test.sh
+```
+
+Set `UNCORDEX_PKG_REQUIRE_SIGNED=1` for a signed release artifact and `UNCORDEX_PKG_REQUIRE_NOTARIZED=1` when notarization is required. Without `UNCORDEX_PKG_UNDER_TEST`, the package suite checks rejection cases only. It does not validate a built package or install anything. See [Packaging](pkg.md) and [Releasing](releasing.md).
+
+Consider [Clean Development](https://github.com/magrathean-uk/clean-development) for managing development caches and supported build output.
+
+## Acceptance
+
+A passing fixture suite establishes behavior under its substituted boundaries. A universal binary and deployment target establish build configuration. Neither establishes behavior on a particular Mac or speaker.
+
+For hardware work, record the exact source and artifact, macOS version, architecture, hardware, observed state transitions, manual actions, and remaining gaps. Treat [the dated acceptance record](testing/2026-09-09-live-acceptance.md) as historical evidence for its stated implementation. Do not reuse its counts or package hash as validation of a later change.

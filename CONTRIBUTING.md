@@ -1,40 +1,19 @@
-# Contributing to Uncordex
+# Contributing
 
-Thanks for improving Uncordex.
+Uncordex controls one already-paired Bluetooth speaker through a per-user macOS service. Keep changes focused on that behavior.
 
-## Before changing code
+## Make a change
 
-- Keep scripts compatible with macOS Bash 3.2.
-- Preserve Apple Silicon and Intel Homebrew discovery.
-- Do not add telemetry, accounts, cloud services, automatic pairing, Bluetooth-radio control, or audio-output switching.
-- Do not run the installer or uninstaller as an ordinary source check.
-- Do not operate real Bluetooth devices or real LaunchAgents in automated tests.
-- Preserve unrelated work and never edit `.serena/`.
+Read the relevant code and [development guide](docs/development.md). Preserve unrelated work and leave `.serena/` alone. Shell code must run with macOS Bash 3.2 and find Homebrew on both Apple Silicon and Intel.
 
-## Tests
+Do not add accounts, telemetry, cloud services, automatic pairing, Bluetooth-radio control, or audio-output switching. Keep manual speaker actions respected and never broaden a saved-source rule silently.
 
-Write a focused regression test before changing behavior. Run:
+For behavior changes, add a focused regression case that reproduces the issue. Substitute power, hardware, Bluetooth, time, filesystem paths, and LaunchAgent boundaries. Do not run the real installer, uninstaller, or Bluetooth operations as ordinary automated verification.
 
-```bash
-bash -n \
-  install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh app/window-test.sh \
-  packaging/build.sh packaging/validate.sh packaging/test.sh
-bash tests/run.sh
-bash app/test.sh
-```
+## Review a change
 
-Run ShellCheck when it is already available:
+Describe the user-visible result, the checks performed, and any remaining acceptance gaps. Use the targeted checks in [Development](docs/development.md); distinguish simulated tests, build and package inspection, fixture visuals, and physical hardware results.
 
-```bash
-shellcheck \
-  install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh app/window-test.sh \
-  packaging/build.sh packaging/validate.sh packaging/test.sh
-```
+Exclude local configuration, runtime state, logs, device addresses, source keys, credentials, and signing-account details from patches. Preserve the [MIT license](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md), including notices for anything newly distributed.
 
-For package changes, validate a finished artifact with `packaging/test.sh`; package validation does not install it. Report simulated verification, package inspection, and physical hardware acceptance separately.
-
-## Changes and pull requests
-
-Keep changes small and explain user-visible behavior, test coverage, and hardware limits. Do not claim that fixture-based checks prove real dock, charger, or Bluetooth-speaker behavior. Do not include user configuration, runtime state, logs, device addresses, source keys, or credentials.
+Use [Support](SUPPORT.md) for ordinary problems and [Security](SECURITY.md) for vulnerabilities. Publication, installation, signing, notarization, and live service changes are separate actions; existing authorization for an action does not need to be requested again.

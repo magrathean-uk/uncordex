@@ -1,5 +1,5 @@
-After installation, open Uncordex from Applications. The package alone does not start the background service.
+After installation, open Uncordex from Applications. Installing the package does not start its background service.
 
-The app requires blueutil, available with `brew install blueutil`. In the app, open Speaker & Rule, discover your paired speaker and connected source, preview the rule, then choose Save & Start. That explicit action installs and starts the logged-in user's background service.
+The app requires blueutil. Install it with `brew install blueutil`. In Uncordex, open Speaker & Rule, find your paired speaker and connected source, choose and preview a rule, then select Save & Start. That explicit action saves setup and starts the logged-in user's service.
 
-Installing or upgrading the app preserves existing per-user configuration, state, logs, and LaunchAgents. Apply setup in the updated app when you want to update the running service files.
+Installing or upgrading the app preserves existing per-user configuration, runtime state, logs, backups, and LaunchAgent files. Apply setup in the updated app when you want to update the running service files.

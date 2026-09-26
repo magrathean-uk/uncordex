@@ -64,4 +64,4 @@ The macOS package is non-relocatable and installs only `/Applications/Uncordex.a
 
 **Save & Start** or `install.sh` stages service files and configuration before stopping the existing canonical job. Validation failures leave the current installation untouched. Activation failure restores the backup and reloads the previous job when it was already active.
 
-The architecture excludes permanent connection enforcement, multiple-speaker profiles, automatic pairing, Bluetooth-radio control, automatic dependency installation, cloud services, accounts, and telemetry.
+The architecture excludes permanent connection enforcement, multiple-speaker profiles, automatic pairing, Bluetooth-radio control, cloud services, accounts, and telemetry. The app and package do not install dependencies. The source installer may run Homebrew when `blueutil` is missing, unless `--no-install-dependencies` or `--dry-run` is set.

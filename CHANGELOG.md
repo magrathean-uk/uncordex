@@ -1,5 +1,7 @@
 # Changelog
 
+Entries describe repository development. Consult the matching tag and release assets before treating an entry as a distributed app or package.
+
 ## Unreleased
 
 - Require fresh source confirmation after unreadable observations and retain the reconnect budget when readings become unknown during an attempt.
@@ -9,7 +11,7 @@
 - Guard package-validation cleanup paths and support validation of unsigned development packages without weakening required-signature checks.
 - Add simulated service and AppKit regression coverage, validate app version input, and correct the installation guide's discovery button label.
 
-## 1.0.0 — 2026-09-09
+## 1.0.0 (2026-09-09)
 
 - Added exact Thunderbolt/USB4, serialized USB hub, and serialized adapter discovery.
 - Added saved-source, any-external-power, and disconnect-only rules.
