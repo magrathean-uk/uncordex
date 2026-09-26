@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Require fresh source confirmation after unreadable observations and retain the reconnect budget when readings become unknown during an attempt.
+- Preserve running-service files when the installer or uninstaller cannot stop the LaunchAgent; reject repeated or conflicting setup options.
+- Preserve speaker selections across reordered discovery and retain both prior lists when discovery fails.
+- Wait for active app operations before quitting, and expand preview/error feedback so it remains readable at the minimum window size.
+- Guard package-validation cleanup paths and support validation of unsigned development packages without weakening required-signature checks.
+- Add simulated service and AppKit regression coverage, validate app version input, and correct the installation guide's discovery button label.
+
 ## 1.0.0 — 2026-09-09
 
 - Added exact Thunderbolt/USB4, serialized USB hub, and serialized adapter discovery.

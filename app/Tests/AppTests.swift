@@ -22,6 +22,9 @@ private final class MockRunner: ProcessRunning {
     var serviceRunning = false
     var loadedFailure = false
     var serviceReport: String?
+    var blockSetup = false
+    let setupStarted = DispatchSemaphore(value: 0)
+    let allowSetup = DispatchSemaphore(value: 0)
 
     func run(executable: URL, arguments: [String], environment: [String: String]?, timeout: TimeInterval) throws -> ProcessResult {
         commands.append((executable.lastPathComponent, arguments))
@@ -58,6 +61,10 @@ private final class MockRunner: ProcessRunning {
             return ProcessResult(status: discoveryFails ? 2 : 0, stdout: Data("1\tthunderbolt\tTest Dock\t\(String(repeating: "a", count: 64))\n".utf8), stderr: discoveryFails ? Data("Hardware discovery failed".utf8) : Data())
         }
         if executable.lastPathComponent == "install.sh" {
+            if blockSetup {
+                setupStarted.signal()
+                _ = allowSetup.wait(timeout: .now() + 2)
+            }
             return ProcessResult(status: setupFails ? 1 : 0, stdout: Data("Preview complete".utf8), stderr: setupFails ? Data("blueutil is required; install it with Homebrew: brew install blueutil".utf8) : Data())
         }
         if executable.path == "/bin/launchctl" {
@@ -71,9 +78,15 @@ private final class ModelAdapter: ServiceAdapting {
     var refreshes = 0
     var mutations = 0
     var logsDirectory = URL(fileURLWithPath: "/tmp")
+    var speakers: [PairedSpeaker] = []
+    var sources: [SourceCandidate] = []
+    var sourceDiscoveryError: Error?
     func refresh() throws -> AppSnapshot { refreshes += 1; return .loading }
-    func pairedSpeakers() throws -> [PairedSpeaker] { [] }
-    func discoverSources() throws -> [SourceCandidate] { [] }
+    func pairedSpeakers() throws -> [PairedSpeaker] { speakers }
+    func discoverSources() throws -> [SourceCandidate] {
+        if let sourceDiscoveryError { throw sourceDiscoveryError }
+        return sources
+    }
     func preview(address: String, rule: RuleChoice) throws -> String { "preview" }
     func apply(address: String, rule: RuleChoice) throws -> String { mutations += 1; return "apply" }
     func start() throws { mutations += 1 }
@@ -116,6 +129,19 @@ private enum AppTests {
         catch { check(error.localizedDescription.contains("brew install blueutil"), "dependency disappearance at apply time is displayed") }
         check(setup.commands.contains(where: { $0.1.contains("--no-install-dependencies") }), "app setup forbids dependency installation at execution time")
 
+        let concurrent = MockRunner(); let concurrentAdapter = ServiceAdapter(runner: concurrent, paths: paths); _ = try! concurrentAdapter.refresh()
+        concurrent.blockSetup = true
+        let setupFinished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            _ = try? concurrentAdapter.apply(address: "AA-BB-CC-DD-EE-FF", rule: .anyPower)
+            setupFinished.signal()
+        }
+        check(concurrent.setupStarted.wait(timeout: .now() + 1) == .success, "fixture setup reaches its controlled in-flight state")
+        do { try concurrentAdapter.stop(); check(false, "concurrent service change is rejected") }
+        catch { check(error.localizedDescription.contains("already in progress"), "concurrent service change is rejected") }
+        concurrent.allowSetup.signal()
+        check(setupFinished.wait(timeout: .now() + 1) == .success, "in-flight setup completes after its fixture gate opens")
+
         let controls = MockRunner(); let controlsAdapter = ServiceAdapter(runner: controls, paths: paths); _ = try! controlsAdapter.refresh()
         try! controlsAdapter.start(); try! controlsAdapter.stop()
         check(controls.commands.contains(where: { $0.1.first == "bootstrap" }), "start bootstraps the canonical LaunchAgent")
@@ -147,6 +173,18 @@ private enum AppTests {
         check(modelAdapter.refreshes == 0 && modelAdapter.mutations == 0, "model initialization performs no I/O")
         try! model.refresh(); model.quit()
         check(modelAdapter.refreshes == 1 && modelAdapter.mutations == 0, "launch refresh and quit perform no mutations")
+
+        let savedSpeaker = PairedSpeaker(name: "Saved", address: "AA-BB-CC-DD-EE-FF", connected: false)
+        let savedSource = SourceCandidate(kind: "thunderbolt", label: "Saved Dock", key: String(repeating: "a", count: 64))
+        modelAdapter.speakers = [savedSpeaker]
+        modelAdapter.sources = [savedSource]
+        try! model.discover()
+        modelAdapter.speakers = [PairedSpeaker(name: "New", address: "11-22-33-44-55-66", connected: false)]
+        modelAdapter.sourceDiscoveryError = AdapterError.command("Hardware discovery failed")
+        do { try model.discover(); check(false, "source discovery failure prevents a partial picker update") }
+        catch {
+            check(model.speakers == [savedSpeaker] && model.sources == [savedSource], "source discovery failure preserves the prior picker choices")
+        }
 
         let runner = SystemProcessRunner()
         let started = Date()

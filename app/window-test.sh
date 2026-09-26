@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DEVELOPMENT_BUILD_ROOT="$HOME/dev/build"
-BUILD_ROOT="${UNCORDEX_BUILD_ROOT:-$DEVELOPMENT_BUILD_ROOT/uncordex/gui}"
+BUILD_ROOT="${UNCORDEX_BUILD_ROOT:-$DEVELOPMENT_BUILD_ROOT/uncordex/gui}/window-tests"
 case "$BUILD_ROOT" in
-  "$DEVELOPMENT_BUILD_ROOT"|"$DEVELOPMENT_BUILD_ROOT"/*) ;;
-  *) /usr/bin/printf 'UNCORDEX_BUILD_ROOT must stay under %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 64 ;;
+  "$DEVELOPMENT_BUILD_ROOT"/*) ;;
+  *) /usr/bin/printf 'UNCORDEX_BUILD_ROOT must stay below %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 64 ;;
 esac
 case "/$BUILD_ROOT/" in
   */../*|*/./*) /usr/bin/printf '%s\n' 'UNCORDEX_BUILD_ROOT must not contain dot path components' >&2; exit 64 ;;
@@ -23,15 +23,14 @@ esac
 /bin/mkdir -p "$BUILD_ROOT"
 BUILD_ROOT="$(cd "$BUILD_ROOT" && pwd -P)"
 case "$BUILD_ROOT" in
-  "$DEVELOPMENT_BUILD_ROOT"|"$DEVELOPMENT_BUILD_ROOT"/*) ;;
+  "$DEVELOPMENT_BUILD_ROOT"/*) ;;
   *) /usr/bin/printf 'UNCORDEX_BUILD_ROOT resolves outside %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 64 ;;
 esac
-TEST_ROOT="$BUILD_ROOT/tests"
 TMPDIR="$BUILD_ROOT/tmp"
 SWIFT_MODULE_CACHE_PATH="$BUILD_ROOT/swift-module-cache"
 CLANG_MODULE_CACHE_PATH="$BUILD_ROOT/clang-module-cache"
 export TMPDIR SWIFT_MODULE_CACHE_PATH CLANG_MODULE_CACHE_PATH
-/bin/mkdir -p "$TEST_ROOT" "$TMPDIR" "$SWIFT_MODULE_CACHE_PATH" "$CLANG_MODULE_CACHE_PATH"
+/bin/mkdir -p "$TMPDIR" "$SWIFT_MODULE_CACHE_PATH" "$CLANG_MODULE_CACHE_PATH"
 
 architecture="$(uname -m)"
 SDK="$(xcrun --show-sdk-path)"
@@ -45,8 +44,9 @@ xcrun swiftc \
   "$ROOT_DIR/app/Sources/ProcessRunner.swift" \
   "$ROOT_DIR/app/Sources/ServiceAdapter.swift" \
   "$ROOT_DIR/app/Sources/AppModel.swift" \
-  "$ROOT_DIR/app/Tests/AppTests.swift" \
-  -o "$TEST_ROOT/UncordexTests"
+  "$ROOT_DIR/app/Sources/NativeLayout.swift" \
+  "$ROOT_DIR/app/Sources/MainWindowController.swift" \
+  "$ROOT_DIR/app/Tests/WindowTests.swift" \
+  -o "$BUILD_ROOT/UncordexWindowTests"
 
-"$TEST_ROOT/UncordexTests"
-bash "$ROOT_DIR/app/window-test.sh"
+"$BUILD_ROOT/UncordexWindowTests"

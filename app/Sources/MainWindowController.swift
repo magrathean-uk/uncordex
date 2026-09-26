@@ -6,8 +6,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private let isDemo: Bool
     private let worker = DispatchQueue(label: "uk.magrathean.uncordex.gui-work", qos: .userInitiated)
     private var operationInFlight = false
+    private var terminationPending = false
+    private var displayedSpeakers: [PairedSpeaker] = []
     private var ruleChoices: [RuleChoice] = []
     private var capturedDemo = false
+    private var resultHeight: NSLayoutConstraint?
 
     private let sidebar = NSTableView()
     private let pages = NSTabView()
@@ -71,6 +74,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     func loadInitialState() { refresh() }
     func prepareToQuit() { model.quit() }
 
+    func requestTermination() -> NSApplication.TerminateReply {
+        guard operationInFlight else { return .terminateNow }
+        terminationPending = true
+        showMessage("Finishing the current operation before quitting…")
+        return .terminateLater
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard operationInFlight else { return true }
+        NSApp.terminate(nil)
+        return false
+    }
+
     private func buildUI(in window: NSWindow) {
         window.toolbarStyle = .unified
         let toolbar = NSToolbar(identifier: "UncordexToolbar")
@@ -122,7 +138,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         messageValue.maximumNumberOfLines = 0
         messageValue.textColor = .secondaryLabelColor
         let result = NativeLayout.scroll(NativeLayout.stack([messageValue], spacing: 0), inset: 12)
-        result.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        resultHeight = result.heightAnchor.constraint(equalToConstant: 0)
+        resultHeight?.isActive = true
         progress.style = .spinning
         progress.controlSize = .small
         progress.isDisplayedWhenStopped = false
@@ -278,6 +295,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         let draftRule = hasLoadedSetup ? chosenRule() : nil
         let wasManual = hasLoadedSetup && speakerPopup.indexOfSelectedItem == speakerPopup.numberOfItems - 1
         let configured = model.snapshot.deviceAddress
+        displayedSpeakers = model.speakers
         speakerPopup.removeAllItems()
         for speaker in model.speakers {
             let suffix = speaker.connected ? " • connected" : ""
@@ -367,9 +385,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
         if case .loadedNotRunning(let detail) = state.service {
             problems.append("The LaunchAgent is loaded but not running (\(detail)). Restart it, or stop it before correcting setup.")
         }
-        messageValue.stringValue = problems.joined(separator: " ")
         let needsAttention = !state.blueutilAvailable || state.configState == "invalid" || !state.watcherError.isEmpty || state.service.canStart && state.service.canStop
-        messageValue.textColor = needsAttention ? .systemRed : .secondaryLabelColor
+        showMessage(problems.joined(separator: " "), isError: needsAttention)
         updateControls()
         rebuildPickers()
         if !hasLoadedSetup {
@@ -433,7 +450,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     private func chosenAddress() -> String {
         let index = speakerPopup.indexOfSelectedItem
-        if index >= 0 && index < model.speakers.count { return model.speakers[index].address }
+        if displayedSpeakers.indices.contains(index) { return displayedSpeakers[index].address }
         return addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -442,12 +459,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     }
 
     private func perform(mutation: Bool = false, work: @escaping () throws -> String, completion: (() -> Void)? = nil) {
-        guard !operationInFlight else { return }
+        guard !operationInFlight, !terminationPending else { return }
         operationInFlight = true
         progress.startAnimation(nil)
         setControlsEnabled(false)
-        messageValue.stringValue = mutation ? "Working…" : "Refreshing…"
-        messageValue.textColor = .secondaryLabelColor
+        showMessage(mutation ? "Working…" : "Refreshing…")
         worker.async { [weak self] in
             guard let self else { return }
             let result: Result<String, Error>
@@ -455,20 +471,28 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
             DispatchQueue.main.async {
                 self.operationInFlight = false
                 self.progress.stopAnimation(nil)
+                if self.terminationPending {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                    return
+                }
                 var succeeded = false
                 switch result {
                 case .success(let message):
                     succeeded = true
-                    self.messageValue.stringValue = message
-                    self.messageValue.textColor = .secondaryLabelColor
+                    self.showMessage(message)
                 case .failure(let error):
-                    self.messageValue.stringValue = error.localizedDescription
-                    self.messageValue.textColor = .systemRed
+                    self.showMessage(error.localizedDescription, isError: true)
                 }
                 self.updateControls()
                 if succeeded { completion?() }
             }
         }
+    }
+
+    private func showMessage(_ message: String, isError: Bool = false) {
+        messageValue.stringValue = message
+        messageValue.textColor = isError ? .systemRed : .secondaryLabelColor
+        resultHeight?.constant = message.isEmpty ? 0 : 96
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
@@ -524,13 +548,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     }
 
     @objc private func preview() {
-        guard let rule = chosenRule() else { messageValue.stringValue = "Choose a reconnection rule."; return }
+        guard let rule = chosenRule() else { showMessage("Choose a reconnection rule."); return }
         let address = chosenAddress()
         perform(work: { [model] in try model.preview(address: address, rule: rule) })
     }
 
     @objc private func apply() {
-        guard let rule = chosenRule() else { messageValue.stringValue = "Choose a reconnection rule."; return }
+        guard let rule = chosenRule() else { showMessage("Choose a reconnection rule."); return }
         let address = chosenAddress()
         perform(mutation: true, work: { [model] in try model.apply(address: address, rule: rule) }, completion: { [weak self] in self?.hasLoadedSetup = false; self?.refresh() })
     }
@@ -546,8 +570,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTableV
     @objc private func openLogs() {
         let directory = model.logsDirectory
         guard FileManager.default.fileExists(atPath: directory.path) else {
-            messageValue.stringValue = "No log directory exists yet: \(directory.path)"
-            messageValue.textColor = .systemRed
+            showMessage("No log directory exists yet: \(directory.path)", isError: true)
             return
         }
         NSWorkspace.shared.open(directory)

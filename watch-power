@@ -320,7 +320,7 @@ _attempt_restore() {
   post_power="$(read_power)"
   post_source=match
   if [ "$RECONNECT_MODE" = source ]; then post_source="$(read_saved_source)"; fi
-  if [ "$post_power" != ac ] || { [ "$RECONNECT_MODE" = source ] && [ "$post_source" != match ]; }; then
+  if [ "$post_power" = battery ] || { [ "$RECONNECT_MODE" = source ] && [ "$post_source" = absent ]; }; then
     if [ "$after" = 1 ]; then
       log_error "Saved source disappeared during reconnect; attempting guarded rollback"
       if perform_disconnect && [ "$(speaker_state)" = 0 ]; then
@@ -345,6 +345,27 @@ _attempt_restore() {
       save_state || true
       log_event "Source departed during reconnect; no further attempt is scheduled until it returns"
     fi
+    return 0
+  fi
+  if [ "$post_power" != ac ] || { [ "$RECONNECT_MODE" = source ] && [ "$post_source" != match ]; }; then
+    if [ "$RECONNECT_MODE" = source ] && [ "$post_source" = unknown ]; then
+      SOURCE_STREAK_VALUE=unknown
+      SOURCE_STREAK_COUNT=0
+      FRESH_SOURCE=0
+    fi
+    if [ "$after" = 1 ]; then
+      log_error "Could not confirm reconnect context; attempting guarded rollback"
+      if ! perform_disconnect || [ "$(speaker_state)" != 0 ]; then
+        _consume_permission
+        save_state || true
+        log_error "Rollback disconnect was not verified; restore permission cleared"
+        return 0
+      fi
+      log_event "Rollback disconnect verified; keeping the current reconnect budget"
+    fi
+    now="$(watcher_now)"
+    _schedule_after_failure "$now"
+    save_state || log_error "Could not persist reconnect schedule"
     return 0
   fi
   if [ "$after" = 1 ]; then
@@ -389,7 +410,9 @@ watcher_tick() {
   fi
   if [ "$RECONNECT_MODE" = source ]; then
     if [ "$raw_source" = unknown ]; then
-      SOURCE_STREAK_VALUE=unknown; SOURCE_STREAK_COUNT=0
+      # An unreadable snapshot breaks the fresh-observation chain.  Do not
+      # reuse an earlier match to reconnect immediately when readings resume.
+      SOURCE_STREAK_VALUE=unknown; SOURCE_STREAK_COUNT=0; FRESH_SOURCE=0
     else
       if [ "$SOURCE_STREAK_VALUE" = "$raw_source" ]; then
         SOURCE_STREAK_COUNT=$((SOURCE_STREAK_COUNT + 1))

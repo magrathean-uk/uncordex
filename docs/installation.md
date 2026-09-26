@@ -23,7 +23,7 @@ Install `Uncordex-<version>.pkg`. The package places `Uncordex.app` in `/Applica
 
 The package is script-free. Installation alone does not launch the app, start a LaunchAgent, operate Bluetooth, install dependencies, or create per-user configuration. Open Uncordex after installation and use **Speaker & Rule**:
 
-1. Select **Refresh Devices** to list paired speakers and discover stable power sources.
+1. Select **Find Devices & Sources** to list paired speakers and discover stable power sources.
 2. Choose the speaker or enter its Bluetooth address.
 3. Choose **Saved source**, **Any external power**, or **Disconnect only**.
 4. Select **Preview** and read the exact behavior.

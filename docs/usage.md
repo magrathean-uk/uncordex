@@ -8,7 +8,7 @@ Open Uncordex from `/Applications`. The sidebar separates routine status from se
 - **Speaker & Rule** discovers paired speakers and eligible sources, previews a deliberate rule, and saves or updates the service.
 - **Diagnostics** shows cached watcher observations, `blueutil` availability, operation results, and log access.
 
-Refresh reads current state. It does not connect or disconnect the speaker or change the service. Closing or quitting the app leaves the LaunchAgent running.
+Refresh reads current state. It does not connect or disconnect the speaker or change the service. Closing or quitting the app leaves the LaunchAgent running. If an operation is in progress, the app finishes it before quitting.
 
 ## Choose a rule
 

@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        controller?.requestTermination() ?? .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         controller?.prepareToQuit()
     }

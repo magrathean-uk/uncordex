@@ -18,7 +18,7 @@ Write a focused regression test before changing behavior. Run:
 ```bash
 bash -n \
   install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh \
+  app/build.sh app/test.sh app/window-test.sh \
   packaging/build.sh packaging/validate.sh packaging/test.sh
 bash tests/run.sh
 bash app/test.sh
@@ -29,7 +29,7 @@ Run ShellCheck when it is already available:
 ```bash
 shellcheck \
   install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh \
+  app/build.sh app/test.sh app/window-test.sh \
   packaging/build.sh packaging/validate.sh packaging/test.sh
 ```
 

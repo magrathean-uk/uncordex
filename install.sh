@@ -35,6 +35,7 @@ REQUESTED_MAC=""
 REQUESTED_SOURCE=""
 REQUEST_ANY=0
 REQUEST_DISCONNECT=0
+MODE_OPTION_COUNT=0
 RELEARN=0
 DISCOVER_ONLY=0
 GUI_STATUS_PLIST=0
@@ -46,10 +47,11 @@ while [ "$#" -gt 0 ]; do
     --source)
       [ "$#" -ge 2 ] || fail "--source requires a key"
       REQUESTED_SOURCE="$2"
+      MODE_OPTION_COUNT=$((MODE_OPTION_COUNT + 1))
       shift 2
       ;;
-    --any-power) REQUEST_ANY=1; shift ;;
-    --disconnect-only) REQUEST_DISCONNECT=1; shift ;;
+    --any-power) REQUEST_ANY=1; MODE_OPTION_COUNT=$((MODE_OPTION_COUNT + 1)); shift ;;
+    --disconnect-only) REQUEST_DISCONNECT=1; MODE_OPTION_COUNT=$((MODE_OPTION_COUNT + 1)); shift ;;
     --relearn) RELEARN=1; shift ;;
     --discover) DISCOVER_ONLY=1; shift ;;
     --gui-status-plist) GUI_STATUS_PLIST=1; shift ;;
@@ -65,6 +67,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+[ "$MODE_OPTION_COUNT" -le 1 ] || fail "only one reconnection mode may be supplied; --source, --any-power, and --disconnect-only are mutually exclusive"
 mode_count=0
 [ -n "$REQUESTED_SOURCE" ] && mode_count=$((mode_count + 1))
 [ "$REQUEST_ANY" -eq 1 ] && mode_count=$((mode_count + 1))
@@ -106,7 +109,7 @@ print_sources() {
 }
 
 if [ "$DISCOVER_ONLY" -eq 1 ]; then
-  [ -z "$REQUESTED_MAC" ] && [ "$mode_count" -eq 0 ] && [ "$RELEARN" -eq 0 ] || fail "--discover cannot be combined with setup options"
+  [ -z "$REQUESTED_MAC" ] && [ "$mode_count" -eq 0 ] && [ "$RELEARN" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] && [ "$NO_INSTALL_DEPENDENCIES" -eq 0 ] || fail "--discover cannot be combined with setup options"
   print_sources
   exit $?
 fi
@@ -407,7 +410,14 @@ restore_previous() {
 }
 
 /bin/mkdir -p "$APP_DIR/lib" "$CONFIG_DIR" "$(/usr/bin/dirname "$PLIST")" "$LOG_DIR"
-"$LAUNCHCTL" bootout "gui/$USER_ID" "$PLIST" >/dev/null 2>&1 || true
+if [ "$SERVICE_WAS_LOADED" -eq 1 ]; then
+  if ! "$LAUNCHCTL" bootout "gui/$USER_ID" "$PLIST"; then
+    /usr/bin/printf '%s\n' "The running Uncordex service could not be stopped; installation was left unchanged." >&2
+    exit 1
+  fi
+else
+  "$LAUNCHCTL" bootout "gui/$USER_ID" "$PLIST" >/dev/null 2>&1 || true
+fi
 if ! /usr/bin/install -m 755 "$STAGE/watch-power" "$APP_DIR/watch-power" ||
    ! /usr/bin/install -m 644 "$STAGE/lib/source.sh" "$APP_DIR/lib/source.sh" ||
    ! /usr/bin/install -m 600 "$STAGE/config" "$CONFIG_FILE" ||

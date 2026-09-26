@@ -147,9 +147,9 @@ else
   perform_connect() {
     TEST_CONNECT_COUNT=$((TEST_CONNECT_COUNT + 1))
     TRACE="${TRACE}connect:${TEST_CONNECT_COUNT}\n"
+    if [ -n "${TEST_SOURCE_AFTER_CONNECT:-}" ]; then TEST_SOURCE="$TEST_SOURCE_AFTER_CONNECT"; fi
     if [ "$TEST_CONNECT_COUNT" -ge "$TEST_CONNECT_SUCCEEDS_AT" ]; then
       TEST_CONNECTED=1
-      if [ -n "${TEST_SOURCE_AFTER_CONNECT:-}" ]; then TEST_SOURCE="$TEST_SOURCE_AFTER_CONNECT"; fi
       return 0
     fi
     return 1
@@ -301,6 +301,25 @@ else
   assert_eq "2" "$ATTEMPTS" "retry resumes after two fresh valid source samples"
 
   watcher_fixture_reset
+  TEST_CONNECT_SUCCEEDS_AT=99
+  watcher_tick 0
+  watcher_tick 1
+  TEST_POWER=battery
+  watcher_tick 2
+  TEST_POWER=ac
+  watcher_tick 3
+  assert_eq "1" "$ATTEMPTS" "fresh-source regression begins with one failed attempt"
+  NEXT_ATTEMPT=6
+  TEST_SOURCE=unknown
+  watcher_tick 4
+  watcher_tick 5
+  TEST_SOURCE=match
+  watcher_tick 6
+  assert_eq "1" "$ATTEMPTS" "one recovered source sample cannot use a stale match"
+  watcher_tick 7
+  assert_eq "2" "$ATTEMPTS" "two recovered source samples permit a due retry"
+
+  watcher_fixture_reset
   TEST_BLUETOOTH_OK=0
   watcher_tick 0
   watcher_tick 1
@@ -387,6 +406,37 @@ else
 
   watcher_fixture_reset
   TEST_CONNECT_SUCCEEDS_AT=99
+  TEST_SOURCE_AFTER_CONNECT=unknown
+  watcher_tick 0
+  watcher_tick 1
+  TEST_POWER=battery
+  watcher_tick 2
+  TEST_POWER=ac
+  watcher_tick 3
+  assert_eq "1" "$ATTEMPTS" "unknown post-connect source keeps a failed attempt charged"
+  assert_eq "0" "$DEPARTURE_OBSERVED" "unknown post-connect source does not invent a departure"
+  assert_ne "0" "$WINDOW_DEADLINE" "unknown post-connect source keeps the existing retry window"
+  TEST_SOURCE=match
+  watcher_tick 4
+  watcher_tick 5
+  watcher_tick 8
+  assert_eq "2" "$ATTEMPTS" "a recovered source continues the existing retry budget"
+
+  watcher_fixture_reset
+  TEST_SOURCE_AFTER_CONNECT=unknown
+  watcher_tick 0
+  watcher_tick 1
+  TEST_POWER=battery
+  watcher_tick 2
+  TEST_POWER=ac
+  watcher_tick 3
+  assert_eq "1" "$ATTEMPTS" "unknown post-connect source keeps a successful attempt charged"
+  assert_eq "0" "$DEPARTURE_OBSERVED" "unknown after a successful connect does not invent a departure"
+  assert_ne "0" "$WINDOW_DEADLINE" "unknown after a successful connect keeps the retry window"
+  assert_eq "0" "$TEST_CONNECTED" "unknown after a successful connect rolls back the watcher connection"
+
+  watcher_fixture_reset
+  TEST_CONNECT_SUCCEEDS_AT=99
   watcher_tick 0
   watcher_tick 1
   TEST_POWER=battery
@@ -420,6 +470,7 @@ make_fake_install_tools() {
     '  case "${2:-}" in *com.bolyki.bt-auto-speaker-power) [ "${UNCORDEX_BT_AUTO_LEGACY_SERVICE_PRESENT:-0}" = 1 ] && exit 0 ;; *com.unplugged-speaker.watch-power) [ "${UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT:-0}" = 1 ] && exit 0 ;; *uk.magrathean.uncordex.watch-power) [ "${UNCORDEX_CANONICAL_LOADED:-0}" = 1 ] && exit 0 ;; esac' \
     '  exit 1' \
     'fi' \
+    'if [ "${1:-}" = bootout ] && [ "${UNCORDEX_FAIL_BOOTOUT:-0}" = 1 ]; then exit 1; fi' \
     'if [ "${1:-}" = bootstrap ] && [ "${UNCORDEX_FAIL_BOOTSTRAP_ONCE:-0}" = 1 ] && [ ! -e "${UNCORDEX_LAUNCH_TRACE}.failed-once" ]; then touch "${UNCORDEX_LAUNCH_TRACE}.failed-once"; exit 1; fi' \
     'exit 0' >"$FAKE_LAUNCHCTL"
   /bin/chmod 755 "$FAKE_BLUEUTIL" "$FAKE_LAUNCHCTL"
@@ -519,7 +570,27 @@ assert_contains "Installed uk.magrathean.uncordex.watch-power" "$no_dependency_i
 conflict_output="$(run_installer conflict AA-BB-CC-DD-EE-FF --any-power --disconnect-only --dry-run 2>&1)"
 conflict_status=$?
 assert_ne "0" "$conflict_status" "conflicting mode flags fail"
-assert_contains "mutually exclusive" "$conflict_output" "mode conflict explains the correction"
+assert_contains "only one reconnection mode" "$conflict_output" "mode conflict explains the correction"
+
+duplicate_any_output="$(run_installer duplicate-any AA-BB-CC-DD-EE-FF --any-power --any-power --dry-run 2>&1)"
+duplicate_any_status=$?
+assert_ne "0" "$duplicate_any_status" "repeated any-power mode fails"
+assert_contains "only one reconnection mode" "$duplicate_any_output" "repeated any-power mode explains the correction"
+
+duplicate_source_output="$(run_installer duplicate-source AA-BB-CC-DD-EE-FF --source "$dock_key" --source "$dock_key" --dry-run 2>&1)"
+duplicate_source_status=$?
+assert_ne "0" "$duplicate_source_status" "repeated source mode fails"
+assert_contains "only one reconnection mode" "$duplicate_source_output" "repeated source mode explains the correction"
+
+discover_dry_output="$(run_installer discover-dry --discover --dry-run 2>&1)"
+discover_dry_status=$?
+assert_ne "0" "$discover_dry_status" "discovery rejects dry-run setup modifier"
+assert_contains "--discover cannot be combined" "$discover_dry_output" "discovery dry-run conflict is explicit"
+
+discover_dependency_output="$(run_installer discover-dependency --discover --no-install-dependencies 2>&1)"
+discover_dependency_status=$?
+assert_ne "0" "$discover_dependency_status" "discovery rejects dependency setup modifier"
+assert_contains "--discover cannot be combined" "$discover_dependency_output" "discovery dependency conflict is explicit"
 
 missing_output="$(run_installer missing AA-BB-CC-DD-EE-FF --dry-run 2>&1)"
 missing_status=$?
@@ -549,6 +620,41 @@ assert_ne "0" "$staging_status" "staging validation failure is reported"
 case "$staging_output" in *"Installed uk.magrathean.uncordex.watch-power"*) fail "staging failure never reports installation success" ;; *) pass "staging failure never reports installation success" ;; esac
 if [ ! -e "$TEST_ROOT/staging-failure" ]; then pass "staging failure leaves existing service paths untouched"
 else fail "staging failure leaves existing service paths untouched"; fi
+
+mkdir_failure_base="$TEST_ROOT/mkdir-failure"
+/bin/mkdir -p "$mkdir_failure_base/config"
+/usr/bin/printf '%s\n' 'existing config' >"$mkdir_failure_base/config/config"
+/usr/bin/printf '%s\n' 'not a directory' >"$mkdir_failure_base/app"
+UNCORDEX_CANONICAL_LOADED=1
+export UNCORDEX_CANONICAL_LOADED
+if run_installer mkdir-failure AA-BB-CC-DD-EE-FF --any-power >"$mkdir_failure_base/output" 2>&1; then
+  mkdir_failure_status=0
+else
+  mkdir_failure_status=$?
+fi
+unset UNCORDEX_CANONICAL_LOADED
+assert_ne "0" "$mkdir_failure_status" "directory preparation failure is reported"
+assert_eq "existing config" "$(/bin/cat "$mkdir_failure_base/config/config")" "directory preparation failure preserves existing files"
+mkdir_failure_trace="$(/bin/cat "$mkdir_failure_base/launch.trace" 2>/dev/null || true)"
+case "$mkdir_failure_trace" in *"bootout "*) fail "directory preparation failure does not stop the loaded service" ;; *) pass "directory preparation failure does not stop the loaded service" ;; esac
+
+bootout_failure_base="$TEST_ROOT/bootout-failure"
+/bin/mkdir -p "$bootout_failure_base/app/lib" "$bootout_failure_base/config" "$bootout_failure_base/LaunchAgents"
+/usr/bin/printf '%s\n' old-watcher >"$bootout_failure_base/app/watch-power"
+/usr/bin/printf '%s\n' old-library >"$bootout_failure_base/app/lib/source.sh"
+/usr/bin/printf '%s\n' '# old-config' >"$bootout_failure_base/config/config"
+/usr/bin/printf '%s\n' old-plist >"$bootout_failure_base/LaunchAgents/service.plist"
+bootout_failure_output="$(UNCORDEX_CANONICAL_LOADED=1 UNCORDEX_FAIL_BOOTOUT=1 run_installer bootout-failure AA-BB-CC-DD-EE-FF --any-power 2>&1)"
+bootout_failure_status=$?
+assert_ne "0" "$bootout_failure_status" "loaded-service stop failure blocks installation"
+assert_contains "could not be stopped" "$bootout_failure_output" "loaded-service stop failure is explicit"
+assert_eq "old-watcher" "$(/bin/cat "$bootout_failure_base/app/watch-power")" "loaded-service stop failure preserves watcher"
+assert_eq "old-library" "$(/bin/cat "$bootout_failure_base/app/lib/source.sh")" "loaded-service stop failure preserves source library"
+assert_eq "# old-config" "$(/bin/cat "$bootout_failure_base/config/config")" "loaded-service stop failure preserves configuration"
+assert_eq "old-plist" "$(/bin/cat "$bootout_failure_base/LaunchAgents/service.plist")" "loaded-service stop failure preserves LaunchAgent"
+bootout_failure_trace="$(/bin/cat "$bootout_failure_base/launch.trace")"
+assert_contains "bootout gui/" "$bootout_failure_trace" "loaded-service stop failure attempts canonical bootout"
+case "$bootout_failure_trace" in *"bootstrap "*) fail "loaded-service stop failure does not bootstrap a replacement" ;; *) pass "loaded-service stop failure does not bootstrap a replacement" ;; esac
 
 preserve_base="$TEST_ROOT/preserve"
 /bin/mkdir -p "$preserve_base/config"
@@ -631,6 +737,29 @@ FAILING_QUERY="$TEST_ROOT/failing-query"
 /bin/chmod 755 "$FAILING_QUERY"
 query_result="$(UNCORDEX_WATCHER_LIBRARY_ONLY=1 /bin/bash -c '. "$1"; BLUEUTIL="$2"; DEVICE_MAC=AA-BB-CC-DD-EE-FF; speaker_state' _ "$ROOT_DIR/watch-power" "$FAILING_QUERY")"
 assert_eq "unknown" "$query_result" "nonzero connection query containing 1 is treated as unknown"
+
+uninstall_base="$TEST_ROOT/uninstall"
+/bin/mkdir -p "$uninstall_base"
+uninstall_plist="$uninstall_base/service.plist"
+/usr/bin/printf '%s\n' 'test plist' >"$uninstall_plist"
+uninstall_trace="$uninstall_base/launch.trace"
+uninstall_output="$(UNCORDEX_CANONICAL_LOADED=0 UNCORDEX_PLIST="$uninstall_plist" UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" UNCORDEX_LAUNCH_TRACE="$uninstall_trace" "$ROOT_DIR/uninstall.sh" 2>&1)"
+uninstall_status=$?
+assert_eq "0" "$uninstall_status" "isolated uninstall succeeds when the service is unloaded"
+case "$uninstall_output" in *"Stopped Uncordex"*) pass "isolated uninstall reports completion" ;; *) fail "isolated uninstall reports completion" ;; esac
+if [ ! -e "$uninstall_plist" ]; then pass "isolated uninstall removes only its injected plist"
+else fail "isolated uninstall removes only its injected plist"; fi
+assert_contains "print gui/" "$(/bin/cat "$uninstall_trace")" "isolated uninstall checks its canonical service"
+
+/usr/bin/printf '%s\n' 'test plist' >"$uninstall_plist"
+uninstall_failure_trace="$uninstall_base/failure.trace"
+uninstall_failure_output="$(UNCORDEX_CANONICAL_LOADED=1 UNCORDEX_FAIL_BOOTOUT=1 UNCORDEX_PLIST="$uninstall_plist" UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" UNCORDEX_LAUNCH_TRACE="$uninstall_failure_trace" "$ROOT_DIR/uninstall.sh" 2>&1)"
+uninstall_failure_status=$?
+assert_ne "0" "$uninstall_failure_status" "uninstall reports a failed loaded-service stop"
+assert_contains "still running" "$uninstall_failure_output" "failed service stop leaves a clear error"
+if [ -e "$uninstall_plist" ]; then pass "failed service stop preserves its LaunchAgent plist"
+else fail "failed service stop preserves its LaunchAgent plist"; fi
+assert_contains "bootout gui/" "$(/bin/cat "$uninstall_failure_trace")" "loaded uninstall attempts the canonical bootout"
 
 printf '%s tests passed; %s tests failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

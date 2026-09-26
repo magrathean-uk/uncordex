@@ -15,12 +15,34 @@ while [ "$#" -gt 0 ]; do
 done
 [ -f "$PACKAGE" ] || { /usr/bin/printf 'packaging/validate.sh: package is missing\n' >&2; exit 1; }
 
-VERIFY_ROOT="${UNCORDEX_PKG_VERIFY_ROOT:-$HOME/dev/build/uncordex/pkg/verify-standalone}"
-case "$VERIFY_ROOT" in "$HOME/dev/build"|"$HOME/dev/build"/*) ;; *) /usr/bin/printf 'packaging/validate.sh: verify root must stay under %s\n' "$HOME/dev/build" >&2; exit 1 ;; esac
-if [ -e "$VERIFY_ROOT" ]; then /usr/bin/find "$VERIFY_ROOT" -depth -delete; fi
+DEVELOPMENT_BUILD_ROOT="$HOME/dev/build"
+VERIFY_ROOT="${UNCORDEX_PKG_VERIFY_ROOT:-$DEVELOPMENT_BUILD_ROOT/uncordex/pkg/verify-standalone}"
+case "$VERIFY_ROOT" in "$DEVELOPMENT_BUILD_ROOT"/*) ;; *) /usr/bin/printf 'packaging/validate.sh: verify root must stay below %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 1 ;; esac
+case "/$VERIFY_ROOT/" in */../*|*/./*) /usr/bin/printf '%s\n' 'packaging/validate.sh: verify root must not contain dot path components' >&2; exit 1 ;; esac
+/bin/mkdir -p "$DEVELOPMENT_BUILD_ROOT"
+DEVELOPMENT_BUILD_ROOT="$(cd "$DEVELOPMENT_BUILD_ROOT" && pwd -P)"
+VERIFY_ROOT_EXISTS=0
+[ ! -e "$VERIFY_ROOT" ] || VERIFY_ROOT_EXISTS=1
+VERIFY_PROBE="$VERIFY_ROOT"
+while [ ! -e "$VERIFY_PROBE" ]; do VERIFY_PROBE="$(/usr/bin/dirname "$VERIFY_PROBE")"; done
+VERIFY_PROBE="$(cd "$VERIFY_PROBE" && pwd -P)"
+case "$VERIFY_PROBE" in
+  "$DEVELOPMENT_BUILD_ROOT"/*) ;;
+  "$DEVELOPMENT_BUILD_ROOT") [ "$VERIFY_ROOT_EXISTS" -eq 0 ] || { /usr/bin/printf 'packaging/validate.sh: verify root resolves to %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 1; } ;;
+  *) /usr/bin/printf 'packaging/validate.sh: verify root traverses outside %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 1 ;;
+esac
+if [ "$VERIFY_ROOT_EXISTS" -eq 1 ]; then /usr/bin/find "$VERIFY_ROOT" -depth -delete; fi
 /bin/mkdir -p "$VERIFY_ROOT"
+VERIFY_ROOT="$(cd "$VERIFY_ROOT" && pwd -P)"
+case "$VERIFY_ROOT" in "$DEVELOPMENT_BUILD_ROOT"/*) ;; *) /usr/bin/printf 'packaging/validate.sh: verify root resolves outside %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 1 ;; esac
 
-SIGNATURE="$(/usr/sbin/pkgutil --check-signature "$PACKAGE" 2>&1)"
+SIGNATURE=""
+if ! SIGNATURE="$(/usr/sbin/pkgutil --check-signature "$PACKAGE" 2>&1)"; then
+  if [ "$REQUIRE_SIGNED" -eq 1 ]; then
+    /usr/bin/printf '%s\n' "$SIGNATURE" >&2
+    exit 1
+  fi
+fi
 if [ "$REQUIRE_SIGNED" -eq 1 ]; then
   case "$SIGNATURE" in
     *'Developer ID Installer'*) ;;

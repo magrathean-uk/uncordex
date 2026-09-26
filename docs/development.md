@@ -57,7 +57,7 @@ When ShellCheck is already installed, run it over every shell entry point:
 ```bash
 shellcheck \
   install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh \
+  app/build.sh app/test.sh app/window-test.sh \
   packaging/build.sh packaging/validate.sh packaging/test.sh
 ```
 

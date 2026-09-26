@@ -30,11 +30,13 @@ The bundle identifier is `uk.magrathean.uncordex`, the minimum system version is
 ```bash
 app/test.sh
 TMPDIR="$HOME/dev/build/uncordex/gui/tmp" bash tests/run.sh
-bash -n install.sh uninstall.sh watch-power lib/source.sh tests/run.sh app/build.sh app/test.sh
-shellcheck install.sh uninstall.sh watch-power lib/source.sh tests/run.sh app/build.sh app/test.sh
+bash -n install.sh uninstall.sh watch-power lib/source.sh tests/run.sh app/build.sh app/test.sh app/window-test.sh
+shellcheck install.sh uninstall.sh watch-power lib/source.sh tests/run.sh app/build.sh app/test.sh app/window-test.sh
 ```
 
-`app/test.sh` uses a fake service boundary plus harmless local subprocess fixtures. It covers missing `blueutil`, dependency disappearance during Apply, malformed and missing cached state, discovery and setup failures, running/stopped/loaded-failed service states, explicit rule selection, canonical service recovery, ordinary timeouts, large simultaneous output streams, descendant-held pipes, and the absence of mutations during model construction, refresh, and quit.
+`app/test.sh` uses a fake service boundary plus harmless local subprocess fixtures. It covers missing `blueutil`, dependency disappearance during Apply, malformed and missing cached state, discovery and setup failures, running/stopped/loaded-failed service states, explicit rule selection, canonical service recovery, overlapping service changes, ordinary timeouts, large simultaneous output streams, descendant-held pipes, and the absence of mutations during model construction, refresh, and quit.
+
+It also runs `app/window-test.sh`, which constructs AppKit windows with fixture adapters to verify deferred quit and stable speaker selection after reordered discovery. No installed app or real service adapter is launched.
 
 For deterministic visual inspection without hardware or LaunchAgent access:
 
@@ -72,7 +74,9 @@ The native AppKit window uses a sidebar with three destinations:
 - **Speaker & Rule:** paired-device discovery, manual address entry, and explicit reconnection choices with behavior explanations. Preview and Save & Start stay visible below the scrollable form. Save & Start invokes the existing installer and starts the canonical service.
 - **Diagnostics:** cached service observation, Bluetooth helper availability, and logs.
 
-The View menu supports Command-1/2/3 navigation and Command-R refresh. Native controls, SF Symbols, semantic colors, and the sidebar material follow macOS appearance settings. Content and operation results scroll independently at the 760×580 minimum window size. Empty setup opens Speaker & Rule without choosing a reconnection rule. Refresh and discovery preserve draft choices; successful saving reloads the saved setup. The app delegate, window controller, and shared layout helpers are separate source files.
+The View menu supports Command-1/2/3 navigation and Command-R refresh. Native controls, SF Symbols, semantic colors, and the sidebar material follow macOS appearance settings. Content and operation results scroll independently at the 760×580 minimum window size. The result panel expands for previews and errors and collapses when empty. Empty setup opens Speaker & Rule without choosing a reconnection rule. Refresh and discovery preserve draft choices, including when the paired-device list changes order; failed discovery retains the previous complete list. Successful saving reloads the saved setup. The app delegate, window controller, and shared layout helpers are separate source files.
+
+Quitting or closing the window during an operation waits for that operation to finish or reach its timeout. This keeps an active setup process supervised until it completes. Quitting still leaves the background LaunchAgent running.
 
 Fixture screenshots can select a destination with `--page 0`, `--page 1`, or `--page 2`. These flags apply only with `--demo`.
 

@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DEVELOPMENT_BUILD_ROOT="$HOME/dev/build"
 BUILD_ROOT="${UNCORDEX_BUILD_ROOT:-$DEVELOPMENT_BUILD_ROOT/uncordex/gui}"
+VERSION="$(/bin/cat "$ROOT_DIR/VERSION")"
+case "$VERSION" in
+  ''|*[!0-9.]*) /usr/bin/printf '%s\n' 'VERSION must contain only numeric dotted components' >&2; exit 64 ;;
+esac
+/usr/bin/printf '%s\n' "$VERSION" | /usr/bin/grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+  /usr/bin/printf '%s\n' 'VERSION must use X.Y.Z format' >&2
+  exit 64
+}
 case "$BUILD_ROOT" in
   "$DEVELOPMENT_BUILD_ROOT"|"$DEVELOPMENT_BUILD_ROOT"/*) ;;
   *) /usr/bin/printf 'UNCORDEX_BUILD_ROOT must stay under %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 64 ;;
@@ -51,7 +59,6 @@ done
 
 /usr/bin/lipo -create "$BUILD_ROOT/arm64/Uncordex" "$BUILD_ROOT/x86_64/Uncordex" -output "$APP_BUNDLE/Contents/MacOS/Uncordex"
 /bin/cp "$ROOT_DIR/app/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
-VERSION="$(/bin/cat "$ROOT_DIR/VERSION")"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
 

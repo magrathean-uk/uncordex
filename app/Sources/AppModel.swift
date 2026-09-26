@@ -11,8 +11,10 @@ final class AppModel {
     func refresh() throws { snapshot = try adapter.refresh() }
 
     func discover() throws {
-        speakers = try adapter.pairedSpeakers()
-        sources = try adapter.discoverSources()
+        let discoveredSpeakers = try adapter.pairedSpeakers()
+        let discoveredSources = try adapter.discoverSources()
+        speakers = discoveredSpeakers
+        sources = discoveredSources
     }
 
     func preview(address: String, rule: RuleChoice) throws -> String { try adapter.preview(address: address, rule: rule) }
