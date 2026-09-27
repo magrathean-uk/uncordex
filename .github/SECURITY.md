@@ -31,7 +31,7 @@ Report realistic issues that let an untrusted local input or package alter comma
 
 ## Good-faith research and excluded conduct
 
-Magrathean UK Ltd. will not pursue a good-faith researcher for disclosures that:
+MAGRATHEAN UK LTD will not pursue a good-faith researcher for disclosures that:
 
 - target non-production test systems or researcher-owned environments;
 - avoid persistence, destructive changes, denial of service, and access to personal or customer data;

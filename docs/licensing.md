@@ -2,7 +2,7 @@
 
 Uncordex is provided under the MIT License. The complete, controlling license text is in the repository root at [LICENSE](../LICENSE). This document explains the repository layout and does not change that grant.
 
-The root license carries the existing copyright notice for Magrathean UK Ltd. It grants permission to use, copy, modify, merge, publish, distribute, sublicense, and sell copies subject to including the notice and license text. It also contains the complete warranty and liability disclaimer. Do not replace or edit the root license text without qualified review of the rights involved.
+The root license carries the existing copyright notice for MAGRATHEAN UK LTD. It grants permission to use, copy, modify, merge, publish, distribute, sublicense, and sell copies subject to including the notice and license text. It also contains the complete warranty and liability disclaimer. Do not replace or edit the root license text without qualified review of the rights involved.
 
 ## Packaged copy
 

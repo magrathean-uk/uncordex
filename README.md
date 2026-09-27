@@ -1,16 +1,22 @@
-<p align="center">
-  <img src="icon/appicon-paper-cut.png" width="180" alt="Uncordex app icon showing a power plug and wireless signal">
-</p>
-
 <h1 align="center">Uncordex</h1>
 
 <p align="center">A native macOS controller that disconnects one paired Bluetooth speaker when your saved desk setup departs, then restores only a connection it previously disconnected.</p>
 
-<p align="center">macOS 13 or newer · Apple Silicon and Intel · MIT licensed</p>
+<p align="center">
+  <a href="docs/index.md">Documentation</a>
+</p>
 
-Uncordex combines a native AppKit app with a per-user LaunchAgent. It runs locally, keeps configuration on the Mac, and uses [blueutil](https://github.com/toy/blueutil) to control a speaker already paired with macOS.
+## Overview
 
-It has no account, cloud service, telemetry, automatic pairing, Bluetooth-radio control, audio-output switching, or system daemon.
+Uncordex combines a native AppKit app with a per-user LaunchAgent. It runs locally on macOS 13 or newer, on Apple Silicon and Intel, keeps configuration on the Mac, and uses [blueutil](https://github.com/toy/blueutil) to control a speaker already paired with macOS. It has no account, cloud service, telemetry, automatic pairing, Bluetooth-radio control, audio-output switching, or system daemon.
+
+## Features
+
+- Controls one already-paired Bluetooth speaker; manual connections and disconnections are always respected.
+- Three reconnection rules: a saved power source, any external power, or disconnect only.
+- Restores a connection only after verifying that Uncordex itself disconnected it, rather than continually forcing a preferred state.
+- Native AppKit app with Overview, Speaker & Rule, and Diagnostics views.
+- Script-free macOS Installer package that installs the universal app in `/Applications`.
 
 ## How it works
 
@@ -20,9 +26,7 @@ It has no account, cloud service, telemetry, automatic pairing, Bluetooth-radio 
 4. After a confirmed departure, it disconnects the speaker and records ownership only after verifying that the disconnect succeeded.
 5. When the selected setup returns, it reconnects only while that ownership remains valid.
 
-Manual connections and disconnections are respected. Uncordex does not continually force the speaker into a preferred state.
-
-## Reconnection rules
+### Reconnection rules
 
 - **Saved source:** reconnect while AC is present and an exact saved Thunderbolt/USB4 device, serialized USB hub, or serialized power adapter is present.
 - **Any external power:** reconnect after an observed battery-to-AC return. Use this only if every charger is acceptable.
@@ -30,26 +34,26 @@ Manual connections and disconnections are respected. Uncordex does not continual
 
 A saved dock is a presence rule. If another charger already keeps the Mac on AC, attaching the saved dock can make restoration eligible. A different charger cannot satisfy the saved source identity.
 
-## Requirements
+## Getting started
+
+### Requirements
 
 - macOS 13 or newer on Apple Silicon or Intel.
 - A logged-in macOS user session.
 - A Bluetooth speaker already paired with the Mac.
-- Homebrew and `blueutil`.
+- Homebrew and `blueutil`, installed separately:
 
-Install the external helper yourself:
+  ```bash
+  brew install blueutil
+  ```
 
-```bash
-brew install blueutil
-```
-
-## Install the app
+### Install the app
 
 Build the app and macOS package from source using the steps in [package guidance](docs/pkg.md). If you use a published package, check its release notes for the artifact and its stated signing status. After installation, open **Uncordex** from Applications, then open **Speaker & Rule**. Find paired devices and eligible sources, choose a speaker and rule, select **Preview**, then select **Save & Start**.
 
 The package places the app in `/Applications`. Package installation alone does not start a service, control Bluetooth, install dependencies, or create user configuration. App upgrades preserve existing configuration, state, logs, and LaunchAgent files. See [installation](docs/installation.md) and [package details](docs/pkg.md).
 
-## Install from source
+### Install from source
 
 Connect the dock or charger that should qualify restoration, then discover stable source identities:
 
@@ -80,7 +84,7 @@ Preview source setup without persistent writes, service changes, or Bluetooth ac
 ./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY --dry-run
 ```
 
-## Status and removal
+### Status and removal
 
 The app's **Overview** shows service status, saved setup, current power/source readings, and automatic restore state. **Diagnostics** shows watcher observations, dependency status, and log access. From a source checkout or installed service, inspect status and logs with:
 
@@ -101,27 +105,23 @@ Configuration, runtime state, backups, and logs remain available after removal. 
 
 ## Documentation
 
+- [Documentation index](docs/index.md)
 - [Installation](docs/installation.md)
 - [Usage](docs/usage.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Migration from older watchers](docs/migration.md)
-- [Native macOS app](docs/app.md)
-- [macOS installer package](docs/pkg.md)
 - [Architecture](docs/architecture.md)
 - [Development and verification](docs/development.md)
 - [Release process](docs/releasing.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
-- [License overview](docs/licensing.md)
-- [Canonical MIT license text](LICENSE)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
-- [Support](SUPPORT.md)
-
-## License and support
-
-Uncordex is available under the MIT License. See the [license overview](docs/licensing.md), the complete [LICENSE](LICENSE), and [third-party notices](THIRD_PARTY_NOTICES.md). For help and issue reporting, see [SUPPORT](SUPPORT.md).
-
-## Verification boundary
+- [Contributing](.github/CONTRIBUTING.md)
+- [Security policy](.github/SECURITY.md)
+- [Support](.github/SUPPORT.md)
 
 Automated suites use fixture hardware snapshots and substitute Bluetooth, clock, process, and LaunchAgent boundaries. They do not touch real devices or services and cannot prove behavior on a particular Mac, dock, charger, or speaker. The [2026-09-09 live acceptance record](docs/testing/2026-09-09-live-acceptance.md) covers one Bose/ASUS setup on one Mac. macOS 13 runtime behavior, Intel runtime behavior, sleep/wake, reboot/login, and other hardware combinations remain separate acceptance work.
+
+## Licence
+
+Uncordex is open source under the MIT licence. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md). Contributions: see [Contributing](.github/CONTRIBUTING.md).
+
+<sub>© 2026 MAGRATHEAN UK LTD · <a href="https://github.com/magrathean-uk/.github/blob/main/LEGAL.md">Legal</a></sub>

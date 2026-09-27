@@ -29,4 +29,5 @@ For app changes, run `bash app/test.sh`. For package changes, validate the finis
 
 ## Delivery
 
-Keep changes small and focused. Historical records in `docs/plans/` and `docs/superpowers/` are not current task gates. Within existing authorization, continue safe, reversible local work without a fresh approval. Installation, signing, notarization, publishing, tags, releases, and live-service changes require authorization for that action. See `CONTRIBUTING.md` and `docs/development.md` for the full command matrix and evidence boundary.
+Keep changes small and focused. Historical records in `docs/development/archive/` are not current task gates. Within existing authorization, continue safe, reversible local work without a fresh approval. Installation, signing, notarization, publishing, tags, releases, and live-service changes require authorization for that action. See `.github/CONTRIBUTING.md` and `docs/development.md` for the full command matrix and evidence boundary.
+- Legal files (`LICENSE`, `NOTICE`, `docs/legal/`, contributor terms, copyright and attribution strings) are owner-controlled: change them only on the owner's explicit instruction.
