@@ -6,7 +6,7 @@ Run commands from the repository root on macOS. App checks require the Swift com
 
 Ordinary verification must not change the logged-in user's service or Bluetooth devices. Do not run `install.sh` or `uninstall.sh` directly as a test. The service suite supplies isolated paths and substitutes hardware, Bluetooth, clock, and LaunchAgent commands. The app tests use fake service adapters and local subprocess fixtures.
 
-Keep Bash 3.2 compatibility, both Homebrew paths, and the project's single-speaker scope. Preserve unrelated work and never edit `.serena/`.
+Keep Bash 3.2 compatibility, both Homebrew paths, and the project's single-speaker scope. Preserve unrelated work.
 
 ## Choose the checks
 

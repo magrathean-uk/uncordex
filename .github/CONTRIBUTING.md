@@ -4,7 +4,7 @@ Uncordex controls one already-paired Bluetooth speaker through a per-user macOS 
 
 ## Make a change
 
-Read the relevant code and [development guide](../docs/development.md). Preserve unrelated work and leave `.serena/` alone. Shell code must run with macOS Bash 3.2 and find Homebrew on both Apple Silicon and Intel.
+Read the relevant code and [development guide](../docs/development.md). Preserve unrelated work. Shell code must run with macOS Bash 3.2 and find Homebrew on both Apple Silicon and Intel.
 
 Do not add accounts, telemetry, cloud services, automatic pairing, Bluetooth-radio control, or audio-output switching. Keep manual speaker actions respected and never broaden a saved-source rule silently.
 

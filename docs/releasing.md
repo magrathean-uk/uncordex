@@ -7,7 +7,7 @@ Keep each distributed artifact tied to one immutable source commit. Source publi
 1. Update `VERSION` and `CHANGELOG.md`. Confirm app and package metadata derive that version.
 2. Check [licensing](licensing.md), the complete `LICENSE`, and [third-party notices](../THIRD_PARTY_NOTICES.md) against the material being distributed.
 3. Run the relevant [development checks](development.md), including the service and app suites for a release. Inspect fixture visuals for UI changes.
-4. Review the diff and documentation links. Exclude credentials, local account details, device identifiers, logs, `.serena/`, generated output, and unrelated changes.
+4. Review the diff and documentation links. Exclude credentials, local account details, device identifiers, logs, generated output, and unrelated changes.
 5. Record the tested commit and any physical acceptance limits. Commit and publish the verified source when those actions are authorized.
 
 ## Tag and package

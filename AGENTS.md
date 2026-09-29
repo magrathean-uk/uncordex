@@ -3,7 +3,7 @@
 ## Project boundaries
 
 - Uncordex is a local macOS app and per-user LaunchAgent for one already-paired Bluetooth speaker. Keep the app, source scripts, and packaged service behavior aligned.
-- Preserve unrelated and untracked work. Never edit `.serena/`.
+- Preserve unrelated and untracked work.
 - Keep shell scripts compatible with macOS Bash 3.2 and both Apple Silicon and Intel Homebrew paths.
 - Do not add telemetry, accounts, cloud services, automatic Bluetooth pairing, Bluetooth-radio control, audio-output switching, or a privileged daemon.
 
