@@ -39,7 +39,7 @@ The app distinguishes Running, Loaded but not running, Stopped, and Not installe
 Read the saved rule and runtime status with:
 
 ```bash
-~/.local/share/uncordex/watch-power --status
+"${XDG_DATA_HOME:-$HOME/.local/share}/uncordex/watch-power" --status
 ```
 
 Status masks the source key, but includes the saved speaker address and source label. Review and redact output before sharing it. The command does not create runtime state or operate Bluetooth. Inspect the LaunchAgent and logs with:

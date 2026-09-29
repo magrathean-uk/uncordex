@@ -692,6 +692,49 @@ status_plist="$TEST_ROOT/status-only/watcher-status.plist"
 UNCORDEX_WATCHER_LIBRARY_ONLY=0 UNCORDEX_CONFIG_FILE="$TEST_ROOT/success/config/config" UNCORDEX_STATE_FILE="$status_state" "$TEST_ROOT/success/app/watch-power" --status-plist >"$status_plist"
 assert_eq "false" "$(/usr/bin/plutil -extract state_valid raw -n "$status_plist")" "machine watcher status marks missing cache as invalid"
 
+# Default application directory: XDG_DATA_HOME first, then $HOME/.local/share. HOME is a test directory here.
+run_installer_default_app_dir() {
+  install_case="$1"
+  install_home="$2"
+  install_xdg="$3"
+  shift 3
+  INSTALL_BASE="$TEST_ROOT/$install_case"
+  (
+    unset UNCORDEX_APP_DIR XDG_DATA_HOME
+    [ -z "$install_xdg" ] || export XDG_DATA_HOME="$install_xdg"
+    HOME="$install_home" \
+    UNCORDEX_THUNDERBOLT_SNAPSHOT="$FIXTURES/thunderbolt-dock.plist" \
+    UNCORDEX_USB_SNAPSHOT="$FIXTURES/empty.plist" \
+    UNCORDEX_ADAPTER_SNAPSHOT="$FIXTURES/empty.plist" \
+    UNCORDEX_CONFIG_DIR="$INSTALL_BASE/config" \
+    UNCORDEX_STATE_DIR="$INSTALL_BASE/state" \
+    UNCORDEX_PLIST="$INSTALL_BASE/LaunchAgents/service.plist" \
+    UNCORDEX_LOG_DIR="$INSTALL_BASE/logs" \
+    UNCORDEX_BLUEUTIL="$FAKE_BLUEUTIL" \
+    UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" \
+    UNCORDEX_LAUNCH_TRACE="$INSTALL_BASE/launch.trace" \
+    "$ROOT_DIR/install.sh" "$@"
+  )
+}
+
+xdg_home="$TEST_ROOT/xdg-data-home-home"
+xdg_data="$TEST_ROOT/xdg-data-home-data"
+run_installer_default_app_dir xdg-data-home "$xdg_home" "$xdg_data" AA-BB-CC-DD-EE-FF --any-power >/dev/null 2>&1
+xdg_status=$?
+assert_eq "0" "$xdg_status" "installation with XDG_DATA_HOME succeeds"
+if [ -x "$xdg_data/uncordex/watch-power" ] && [ -r "$xdg_data/uncordex/lib/source.sh" ]; then pass "XDG_DATA_HOME selects the default application directory"
+else fail "XDG_DATA_HOME selects the default application directory"; fi
+assert_eq "$xdg_data/uncordex/watch-power" "$(/usr/bin/plutil -extract ProgramArguments.0 raw -n "$TEST_ROOT/xdg-data-home/LaunchAgents/service.plist")" "LaunchAgent runs the watcher from XDG_DATA_HOME"
+if [ ! -e "$xdg_home/.local" ]; then pass "XDG_DATA_HOME leaves the home data directory untouched"
+else fail "XDG_DATA_HOME leaves the home data directory untouched"; fi
+
+fallback_home="$TEST_ROOT/xdg-fallback-home"
+run_installer_default_app_dir xdg-fallback "$fallback_home" "" AA-BB-CC-DD-EE-FF --any-power >/dev/null 2>&1
+fallback_status=$?
+assert_eq "0" "$fallback_status" "installation without XDG_DATA_HOME succeeds"
+if [ -x "$fallback_home/.local/share/uncordex/watch-power" ]; then pass "unset XDG_DATA_HOME falls back to the home data directory"
+else fail "unset XDG_DATA_HOME falls back to the home data directory"; fi
+
 UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT=1
 export UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT
 legacy_unplugged_output="$(run_installer legacy-unplugged AA-BB-CC-DD-EE-FF --any-power 2>&1)"

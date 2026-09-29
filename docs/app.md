@@ -10,7 +10,7 @@ For user setup, see [Installation](installation.md). For developer checks, see [
 bash app/build.sh
 ```
 
-The default result is `$HOME/dev/build/uncordex/gui/Uncordex.app`. `UNCORDEX_BUILD_ROOT` must remain under `$HOME/dev/build`. Bundle identifier `uk.magrathean.uncordex` and minimum OS version come from `app/Info.plist`; the version is read from `VERSION`.
+The default result is `$build_root/uncordex/gui/Uncordex.app`, where `build_root` is the development build root described in [Development](development.md#app-and-package-output). `UNCORDEX_BUILD_ROOT` must remain under it. Bundle identifier `uk.magrathean.uncordex` and minimum OS version come from `app/Info.plist`; the version is read from `VERSION`.
 
 `Contents/Resources/Service` contains the installer, uninstaller, watcher, `lib/source.sh`, version, license, and third-party notices. `icon/Uncordex.icns` supplies the app icon, with `icon/appicon-paper-cut.png` used for repository presentation. The external `blueutil` helper is not bundled.
 
@@ -36,8 +36,8 @@ Overview, Speaker & Rule, and Diagnostics separate status, explicit setup, and d
 After building, capture a fixture window without using the real service:
 
 ```bash
-"$HOME/dev/build/uncordex/gui/Uncordex.app/Contents/MacOS/Uncordex" \
-  --demo --screenshot "$HOME/dev/build/uncordex/gui/visual/window.png"
+"$build_root/uncordex/gui/Uncordex.app/Contents/MacOS/Uncordex" \
+  --demo --screenshot "$build_root/uncordex/gui/visual/window.png"
 ```
 
 With `--demo`, use `--page 0`, `--page 1`, or `--page 2` for the three destinations. Add `--dark`, `--minimum-size`, `--long-content`, or `--empty-setup` to inspect appearance, wrapping, errors, and empty selection. The fixture adapter does not invoke service scripts, `blueutil`, `launchctl`, or hardware.

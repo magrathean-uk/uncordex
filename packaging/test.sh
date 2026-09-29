@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DEVELOPMENT_BUILD_ROOT="$HOME/dev/build"
+DEVELOPMENT_BUILD_ROOT="${CLEAN_DEVELOPMENT_BUILD_ROOT:-${CLEAN_DEVELOPMENT_ROOT:+$CLEAN_DEVELOPMENT_ROOT/builds}}"
+DEVELOPMENT_BUILD_ROOT="${DEVELOPMENT_BUILD_ROOT:-$HOME/dev/build}"
 TEST_ROOT="${UNCORDEX_PKG_TEST_ROOT:-$DEVELOPMENT_BUILD_ROOT/uncordex/pkg-tests}"
 case "$TEST_ROOT" in "$DEVELOPMENT_BUILD_ROOT"/*) ;; *) /usr/bin/printf 'packaging/test.sh: test root must stay below %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 1 ;; esac
 case "/$TEST_ROOT/" in */../*|*/./*) /usr/bin/printf '%s\n' 'packaging/test.sh: test root must not contain dot path components' >&2; exit 1 ;; esac

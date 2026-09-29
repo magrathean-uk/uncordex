@@ -4,6 +4,7 @@ Entries describe repository development. Consult the matching tag and release as
 
 ## Unreleased
 
+- Install the watcher under `XDG_DATA_HOME` when it is set (default unchanged when it is not), and make the app, package, and test scripts write below the Clean Development build root (`CLEAN_DEVELOPMENT_BUILD_ROOT`, then `CLEAN_DEVELOPMENT_ROOT/builds`) instead of a fixed home path. An existing installation at the previous default stays in place until you remove it.
 - Require fresh source confirmation after unreadable observations and retain the reconnect budget when readings become unknown during an attempt.
 - Preserve running-service files when the installer or uninstaller cannot stop the LaunchAgent; reject repeated or conflicting setup options.
 - Preserve speaker selections across reordered discovery and retain both prior lists when discovery fails.

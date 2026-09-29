@@ -94,8 +94,8 @@ The source installer validates staged artifacts before stopping the canonical se
 | Native app | `/Applications/Uncordex.app` |
 | Package receipt | `uk.magrathean.uncordex.pkg` |
 | LaunchAgent | `~/Library/LaunchAgents/uk.magrathean.uncordex.watch-power.plist` |
-| Watcher | `~/.local/share/uncordex/watch-power` |
-| Source reader | `~/.local/share/uncordex/lib/source.sh` |
+| Watcher | `${XDG_DATA_HOME:-~/.local/share}/uncordex/watch-power` |
+| Source reader | `${XDG_DATA_HOME:-~/.local/share}/uncordex/lib/source.sh` |
 | Configuration | `${XDG_CONFIG_HOME:-~/.config}/uncordex/config` |
 | Runtime state | `${XDG_STATE_HOME:-~/.local/state}/uncordex/runtime-state` |
 | Install backups | `${XDG_STATE_HOME:-~/.local/state}/uncordex/install-backups/` |

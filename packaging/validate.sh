@@ -15,7 +15,8 @@ while [ "$#" -gt 0 ]; do
 done
 [ -f "$PACKAGE" ] || { /usr/bin/printf 'packaging/validate.sh: package is missing\n' >&2; exit 1; }
 
-DEVELOPMENT_BUILD_ROOT="$HOME/dev/build"
+DEVELOPMENT_BUILD_ROOT="${CLEAN_DEVELOPMENT_BUILD_ROOT:-${CLEAN_DEVELOPMENT_ROOT:+$CLEAN_DEVELOPMENT_ROOT/builds}}"
+DEVELOPMENT_BUILD_ROOT="${DEVELOPMENT_BUILD_ROOT:-$HOME/dev/build}"
 VERIFY_ROOT="${UNCORDEX_PKG_VERIFY_ROOT:-$DEVELOPMENT_BUILD_ROOT/uncordex/pkg/verify-standalone}"
 case "$VERIFY_ROOT" in "$DEVELOPMENT_BUILD_ROOT"/*) ;; *) /usr/bin/printf 'packaging/validate.sh: verify root must stay below %s\n' "$DEVELOPMENT_BUILD_ROOT" >&2; exit 1 ;; esac
 case "/$VERIFY_ROOT/" in */../*|*/./*) /usr/bin/printf '%s\n' 'packaging/validate.sh: verify root must not contain dot path components' >&2; exit 1 ;; esac

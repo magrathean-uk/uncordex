@@ -23,7 +23,7 @@ If macOS cannot provide a unique source identity, choose `--any-power` or `--dis
 Create a dated backup outside the old application directories. Run this block in one shell; it stops on a failed copy and skips paths that do not exist. Configuration honors `XDG_CONFIG_HOME` when set. If the old watcher uses custom paths, include those too.
 
 ```bash
-backup_dir="$HOME/.local/state/uncordex/migration-backups/legacy-$(date +%Y%m%d-%H%M%S)"
+backup_dir="${XDG_STATE_HOME:-$HOME/.local/state}/uncordex/migration-backups/legacy-$(date +%Y%m%d-%H%M%S)"
 (
   set -e
   mkdir -p "$backup_dir"

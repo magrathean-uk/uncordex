@@ -21,7 +21,7 @@ fail() { /usr/bin/printf 'Error: %s\n' "$*" >&2; exit 64; }
 is_interactive() { [ "${UNCORDEX_FORCE_INTERACTIVE:-0}" = 1 ] || [ -t 0 ]; }
 
 REPO_DIR="$(cd "$(/usr/bin/dirname "$0")" && pwd)"
-APP_DIR="${UNCORDEX_APP_DIR:-$HOME/.local/share/uncordex}"
+APP_DIR="${UNCORDEX_APP_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/uncordex}"
 CONFIG_DIR="${UNCORDEX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/uncordex}"
 STATE_DIR="${UNCORDEX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/uncordex}"
 PLIST="${UNCORDEX_PLIST:-$HOME/Library/LaunchAgents/uk.magrathean.uncordex.watch-power.plist}"

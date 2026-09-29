@@ -10,7 +10,7 @@ The package is non-relocatable, targets macOS 13 or newer, and uses component id
 bash packaging/build.sh
 ```
 
-The default artifact is `$HOME/dev/build/uncordex/pkg/Uncordex-<version>.pkg`, using `VERSION`. `UNCORDEX_PKG_BUILD_ROOT` selects a dedicated directory under `$HOME/dev/build`. The script replaces its work directories and output artifact. Without signing identities it builds an unsigned development package containing an ad-hoc-signed app.
+The default artifact is `$build_root/uncordex/pkg/Uncordex-<version>.pkg`, using `VERSION`, where `build_root` is the development build root described in [Development](development.md#app-and-package-output). `UNCORDEX_PKG_BUILD_ROOT` selects a dedicated directory under it. The script replaces its work directories and output artifact. Without signing identities it builds an unsigned development package containing an ad-hoc-signed app.
 
 For an authorized distribution build, supply both identities:
 
@@ -26,12 +26,12 @@ Notarization submits the package to Apple. For that separately authorized action
 
 ```bash
 version="$(cat VERSION)"
-UNCORDEX_PKG_UNDER_TEST="$HOME/dev/build/uncordex/pkg/Uncordex-$version.pkg" \
+UNCORDEX_PKG_UNDER_TEST="$build_root/uncordex/pkg/Uncordex-$version.pkg" \
 UNCORDEX_PKG_REQUIRE_SIGNED=1 \
   bash packaging/test.sh
 ```
 
-Omit the signature requirement for an unsigned development package. Add `UNCORDEX_PKG_REQUIRE_NOTARIZED=1` when testing a notarized artifact. `UNCORDEX_PKG_TEST_ROOT` selects a dedicated test directory below `$HOME/dev/build`; the suite clears and recreates it. Standalone validation uses `UNCORDEX_PKG_VERIFY_ROOT` under the same development tree and also replaces its selected workspace.
+Omit the signature requirement for an unsigned development package. Add `UNCORDEX_PKG_REQUIRE_NOTARIZED=1` when testing a notarized artifact. `UNCORDEX_PKG_TEST_ROOT` selects a dedicated test directory below `$build_root`; the suite clears and recreates it. Standalone validation uses `UNCORDEX_PKG_VERIFY_ROOT` under the same development tree and also replaces its selected workspace.
 
 Validation expands the finished archive and inspects payload paths, identifiers, versions, architectures, resources, modes, signatures, Installer choices, and absence of scripts, symlinks, and host metadata. It does not install the package. Without a supplied artifact, the test suite runs rejection cases only.
 

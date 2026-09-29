@@ -38,17 +38,24 @@ bash app/test.sh
 bash app/build.sh
 ```
 
-App output defaults to `$HOME/dev/build/uncordex/gui`. `UNCORDEX_BUILD_ROOT` can select another directory under `$HOME/dev/build`; paths with dot components or resolved escapes are rejected. A build creates a universal arm64/x86_64 app targeting macOS 13.0 and signs it ad hoc. See [App development](app.md) for the bundle and fixture interface.
+The scripts write only below the development build root: `$CLEAN_DEVELOPMENT_BUILD_ROOT` when set, otherwise `$CLEAN_DEVELOPMENT_ROOT/builds`, and `$HOME/dev/build` only when neither variable is set. The examples below use `build_root` for that directory:
+
+```bash
+build_root="${CLEAN_DEVELOPMENT_BUILD_ROOT:-${CLEAN_DEVELOPMENT_ROOT:+$CLEAN_DEVELOPMENT_ROOT/builds}}"
+build_root="${build_root:-$HOME/dev/build}"
+```
+
+App output defaults to `$build_root/uncordex/gui`. `UNCORDEX_BUILD_ROOT` can select another directory under `$build_root`; paths with dot components or resolved escapes are rejected. A build creates a universal arm64/x86_64 app targeting macOS 13.0 and signs it ad hoc. See [App development](app.md) for the bundle and fixture interface.
 
 ```bash
 bash packaging/build.sh
 ```
 
-Without signing identities this produces an unsigned development package. `UNCORDEX_PKG_BUILD_ROOT` defaults to `$HOME/dev/build/uncordex/pkg`. Use the actual version from `VERSION` when selecting an artifact:
+Without signing identities this produces an unsigned development package. `UNCORDEX_PKG_BUILD_ROOT` defaults to `$build_root/uncordex/pkg`. Use the actual version from `VERSION` when selecting an artifact:
 
 ```bash
 version="$(cat VERSION)"
-UNCORDEX_PKG_UNDER_TEST="$HOME/dev/build/uncordex/pkg/Uncordex-$version.pkg" \
+UNCORDEX_PKG_UNDER_TEST="$build_root/uncordex/pkg/Uncordex-$version.pkg" \
   bash packaging/test.sh
 ```
 

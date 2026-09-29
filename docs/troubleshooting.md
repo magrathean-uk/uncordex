@@ -31,7 +31,7 @@ Choose **Any external power** only when every charger may restore the speaker. O
 Check **Overview** and **Diagnostics**, or inspect status and logs:
 
 ```bash
-~/.local/share/uncordex/watch-power --status
+"${XDG_DATA_HOME:-$HOME/.local/share}/uncordex/watch-power" --status
 tail -n 100 ~/Library/Logs/uncordex.log
 tail -n 100 ~/Library/Logs/uncordex-error.log
 ```

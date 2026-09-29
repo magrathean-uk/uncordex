@@ -89,7 +89,7 @@ Preview source setup without persistent writes, service changes, or Bluetooth ac
 The app's **Overview** shows service status, saved setup, current power/source readings, and automatic restore state. **Diagnostics** shows watcher observations, dependency status, and log access. From a source checkout or installed service, inspect status and logs with:
 
 ```bash
-~/.local/share/uncordex/watch-power --status
+"${XDG_DATA_HOME:-$HOME/.local/share}/uncordex/watch-power" --status
 launchctl print "gui/$(id -u)/uk.magrathean.uncordex.watch-power"
 tail -f ~/Library/Logs/uncordex.log
 tail -f ~/Library/Logs/uncordex-error.log
