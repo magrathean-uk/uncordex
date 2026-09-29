@@ -692,7 +692,8 @@ status_plist="$TEST_ROOT/status-only/watcher-status.plist"
 UNCORDEX_WATCHER_LIBRARY_ONLY=0 UNCORDEX_CONFIG_FILE="$TEST_ROOT/success/config/config" UNCORDEX_STATE_FILE="$status_state" "$TEST_ROOT/success/app/watch-power" --status-plist >"$status_plist"
 assert_eq "false" "$(/usr/bin/plutil -extract state_valid raw -n "$status_plist")" "machine watcher status marks missing cache as invalid"
 
-# Default application directory: XDG_DATA_HOME first, then $HOME/.local/share. HOME is a test directory here.
+# Default application directory: XDG_DATA_HOME first, then $HOME/.local/share (an empty XDG_DATA_HOME counts as not set).
+# HOME is a test directory here, and XDG_DATA_HOME is only ever assigned, never unset.
 run_installer_default_app_dir() {
   install_case="$1"
   install_home="$2"
@@ -700,8 +701,9 @@ run_installer_default_app_dir() {
   shift 3
   INSTALL_BASE="$TEST_ROOT/$install_case"
   (
-    unset UNCORDEX_APP_DIR XDG_DATA_HOME
-    [ -z "$install_xdg" ] || export XDG_DATA_HOME="$install_xdg"
+    unset UNCORDEX_APP_DIR
+    XDG_DATA_HOME="$install_xdg"
+    export XDG_DATA_HOME
     HOME="$install_home" \
     UNCORDEX_THUNDERBOLT_SNAPSHOT="$FIXTURES/thunderbolt-dock.plist" \
     UNCORDEX_USB_SNAPSHOT="$FIXTURES/empty.plist" \
@@ -731,9 +733,9 @@ else fail "XDG_DATA_HOME leaves the home data directory untouched"; fi
 fallback_home="$TEST_ROOT/xdg-fallback-home"
 run_installer_default_app_dir xdg-fallback "$fallback_home" "" AA-BB-CC-DD-EE-FF --any-power >/dev/null 2>&1
 fallback_status=$?
-assert_eq "0" "$fallback_status" "installation without XDG_DATA_HOME succeeds"
-if [ -x "$fallback_home/.local/share/uncordex/watch-power" ]; then pass "unset XDG_DATA_HOME falls back to the home data directory"
-else fail "unset XDG_DATA_HOME falls back to the home data directory"; fi
+assert_eq "0" "$fallback_status" "installation with an empty XDG_DATA_HOME succeeds"
+if [ -x "$fallback_home/.local/share/uncordex/watch-power" ]; then pass "an empty XDG_DATA_HOME falls back to the home data directory"
+else fail "an empty XDG_DATA_HOME falls back to the home data directory"; fi
 
 UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT=1
 export UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT
