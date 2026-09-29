@@ -54,7 +54,7 @@ UNCORDEX_PKG_UNDER_TEST="$HOME/dev/build/uncordex/pkg/Uncordex-$version.pkg" \
 
 Set `UNCORDEX_PKG_REQUIRE_SIGNED=1` for a signed release artifact and `UNCORDEX_PKG_REQUIRE_NOTARIZED=1` when notarization is required. Without `UNCORDEX_PKG_UNDER_TEST`, the package suite checks rejection cases only. It does not validate a built package or install anything. See [Packaging](pkg.md) and [Releasing](releasing.md).
 
-Consider [Clean Development](https://github.com/magrathean-uk/clean-development) for managing development caches and supported build output.
+Run these build, test, and package commands through [Clean Development](https://github.com/magrathean-uk/clean-development), as the "Clean development" section of [AGENTS.md](../AGENTS.md) requires, for example `clean-development run --session session-only -- bash app/test.sh`. It routes development caches and supported build output; do not unset or bypass the routed environment variables.
 
 ## Acceptance
 
