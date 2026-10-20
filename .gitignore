@@ -1,1 +1,5 @@
 .DS_Store
+# --- secrets (clean-development) ---
+.env
+.env.*
+!.env.example
