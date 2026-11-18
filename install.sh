@@ -79,8 +79,8 @@ build_helper() {
   fi
   stage="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/uncordex-helper.XXXXXX")/Uncordex.app"
   /bin/mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
-  "$clang" -O2 -mmacosx-version-min=13.0 -arch arm64 -arch x86_64 -o "$stage/Contents/MacOS/uncordex-helper" "$SOURCE_DIR/helper/uncordex-helper.c" 2>/dev/null ||
-    "$clang" -O2 -mmacosx-version-min=13.0 -o "$stage/Contents/MacOS/uncordex-helper" "$SOURCE_DIR/helper/uncordex-helper.c" || return 1
+  /usr/bin/xcrun clang -O2 -mmacosx-version-min=13.0 -arch arm64 -arch x86_64 -o "$stage/Contents/MacOS/uncordex-helper" "$SOURCE_DIR/helper/uncordex-helper.c" 2>/dev/null ||
+    /usr/bin/xcrun clang -O2 -mmacosx-version-min=13.0 -o "$stage/Contents/MacOS/uncordex-helper" "$SOURCE_DIR/helper/uncordex-helper.c" || return 1
   /bin/cp "$SOURCE_DIR/helper/Info.plist" "$stage/Contents/Info.plist"
   /usr/bin/printf '%s\n' "$hash_now" >"$stage/Contents/Resources/source.sha256"
   /usr/bin/codesign --force --sign - "$stage" >/dev/null 2>&1 || return 1
