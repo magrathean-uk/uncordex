@@ -1,0 +1,698 @@
+#!/bin/bash
+# uncordex: disconnect a paired Bluetooth speaker when you leave your desk and
+# reconnect it when you come back. One command for setup, status and control.
+set -euo pipefail
+
+_self_dir() {
+  local path dir
+  path="${BASH_SOURCE[0]}"
+  while [ -L "$path" ]; do
+    dir="$(cd -P "$(/usr/bin/dirname "$path")" && pwd)"
+    path="$(/usr/bin/readlink "$path")"
+    case "$path" in /*) ;; *) path="$dir/$path" ;; esac
+  done
+  cd -P "$(/usr/bin/dirname "$path")" && pwd
+}
+
+SCRIPT_DIR="$(_self_dir)"
+VERSION="$(/bin/cat "$SCRIPT_DIR/VERSION" 2>/dev/null || /usr/bin/printf 'unknown')"
+APP_DIR="${UNCORDEX_APP_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/uncordex}"
+BIN_DIR="${UNCORDEX_BIN_DIR:-$HOME/.local/bin}"
+CONFIG_DIR="${UNCORDEX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/uncordex}"
+STATE_DIR="${UNCORDEX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/uncordex}"
+PLIST="${UNCORDEX_PLIST:-$HOME/Library/LaunchAgents/uk.magrathean.uncordex.watch-power.plist}"
+LOG_DIR="${UNCORDEX_LOG_DIR:-$HOME/Library/Logs}"
+CONFIG_FILE="$CONFIG_DIR/config"
+LABEL="uk.magrathean.uncordex.watch-power"
+LAUNCHCTL="${UNCORDEX_LAUNCHCTL:-/bin/launchctl}"
+PLUTIL="${UNCORDEX_PLUTIL:-/usr/bin/plutil}"
+USER_ID="$(/usr/bin/id -u)"
+SERVICE="gui/$USER_ID/$LABEL"
+LOG_FILE="$LOG_DIR/uncordex.log"
+ERROR_LOG_FILE="$LOG_DIR/uncordex-error.log"
+
+# shellcheck source=lib/source.sh
+. "$SCRIPT_DIR/lib/source.sh"
+
+# ---------------------------------------------------------------- helpers
+
+say() { /usr/bin/printf '%s\n' "$@"; }
+
+# fail MESSAGE [NEXT-STEP...]: print a plain error and what to do next.
+fail() {
+  /usr/bin/printf 'uncordex: %s\n' "$1" >&2
+  shift
+  while [ "$#" -gt 0 ]; do /usr/bin/printf '  %s\n' "$1" >&2; shift; done
+  exit 1
+}
+
+is_interactive() { [ "${UNCORDEX_FORCE_INTERACTIVE:-0}" = 1 ] || [ -t 0 ]; }
+
+ask() {
+  # ask PROMPT: read one answer into ANSWER; end of input cancels.
+  /usr/bin/printf '%s' "$1"
+  if ! IFS= read -r ANSWER; then
+    /usr/bin/printf '\n'
+    fail "setup cancelled; nothing was changed."
+  fi
+}
+
+valid_address() {
+  case "$1" in
+    [[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]][:-][[:xdigit:]][[:xdigit:]]) return 0 ;;
+  esac
+  return 1
+}
+
+normal_address() { /usr/bin/printf '%s' "$1" | /usr/bin/tr 'A-F:' 'a-f-'; }
+
+mask_key() { /usr/bin/printf '%s...%s' "${1:0:4}" "${1: -4}"; }
+
+SAVED_MAC=""; SAVED_NAME=""; SAVED_BLUEUTIL=""; SAVED_MODE=""; SAVED_KIND=""; SAVED_KEY=""; SAVED_LABEL=""
+CONFIG_PRESENT=0; CONFIG_LOAD_OK=1
+load_saved_config() {
+  [ -r "$CONFIG_FILE" ] || return 0
+  CONFIG_PRESENT=1
+  unset CONFIG_VERSION DEVICE_MAC SPEAKER_NAME BLUEUTIL RECONNECT_MODE SOURCE_KIND SOURCE_KEY SOURCE_LABEL 2>/dev/null || true
+  # Owned by the current user and written with Bash-safe quoting by setup.
+  # shellcheck disable=SC1090
+  if ! . "$CONFIG_FILE"; then CONFIG_LOAD_OK=0; fi
+  [ "${CONFIG_VERSION:-}" = 1 ] || CONFIG_LOAD_OK=0
+  SAVED_MAC="${DEVICE_MAC:-}"
+  SAVED_NAME="${SPEAKER_NAME:-}"
+  SAVED_BLUEUTIL="${BLUEUTIL:-}"
+  SAVED_MODE="${RECONNECT_MODE:-}"
+  SAVED_KIND="${SOURCE_KIND:-}"
+  SAVED_KEY="${SOURCE_KEY:-}"
+  SAVED_LABEL="${SOURCE_LABEL:-}"
+}
+
+find_blueutil() {
+  local candidate found
+  if [ -n "${UNCORDEX_BLUEUTIL:-}" ] && [ -x "$UNCORDEX_BLUEUTIL" ]; then /usr/bin/printf '%s\n' "$UNCORDEX_BLUEUTIL"; return 0; fi
+  if [ -n "$SAVED_BLUEUTIL" ] && [ -x "$SAVED_BLUEUTIL" ]; then /usr/bin/printf '%s\n' "$SAVED_BLUEUTIL"; return 0; fi
+  for candidate in /opt/homebrew/bin/blueutil /usr/local/bin/blueutil; do
+    if [ -x "$candidate" ]; then /usr/bin/printf '%s\n' "$candidate"; return 0; fi
+  done
+  found="$(command -v blueutil 2>/dev/null || true)"
+  [ -n "$found" ] && [ -x "$found" ] || return 1
+  /usr/bin/printf '%s\n' "$found"
+}
+
+need_blueutil() {
+  [ -n "$BLUEUTIL_PATH" ] || fail "blueutil is not installed. Uncordex uses it to talk to your speaker." \
+    "Install it with:  brew install blueutil"
+}
+
+BLUETOOTH_HINT="If macOS blocked Bluetooth access, allow your terminal app in System Settings > Privacy & Security > Bluetooth, then try again."
+
+DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=()
+read_paired() {
+  local output line addr name state
+  DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=()
+  output="$("$BLUEUTIL_PATH" --paired 2>&1)" || return 1
+  while IFS= read -r line; do
+    case "$line" in address:*) ;; *) continue ;; esac
+    addr="${line#address: }"; addr="${addr%%,*}"
+    valid_address "$addr" || continue
+    name=""
+    case "$line" in *'name: "'*) name="${line#*name: \"}"; name="${name%%\"*}" ;; esac
+    state="not connected"
+    case "$line" in *", not connected"*) ;; *", connected"*) state=connected ;; esac
+    DEV_ADDRS[${#DEV_ADDRS[@]}]="$(normal_address "$addr")"
+    DEV_NAMES[${#DEV_NAMES[@]}]="$(_source_clean_text "$name")"
+    DEV_STATES[${#DEV_STATES[@]}]="$state"
+  done <<EOF
+$output
+EOF
+  return 0
+}
+
+paired_name() {
+  local wanted index
+  wanted="$1"; index=0
+  while [ "$index" -lt "${#DEV_ADDRS[@]}" ]; do
+    if [ "${DEV_ADDRS[$index]}" = "$wanted" ]; then /usr/bin/printf '%s' "${DEV_NAMES[$index]}"; return 0; fi
+    index=$((index + 1))
+  done
+  return 1
+}
+
+print_paired() {
+  local index marker
+  index=0
+  while [ "$index" -lt "${#DEV_ADDRS[@]}" ]; do
+    marker=" "
+    [ "${DEV_ADDRS[$index]}" != "$(normal_address "$SAVED_MAC")" ] || marker="*"
+    /usr/bin/printf ' %s %2s) %-28s %s  (%s)\n' "$marker" "$((index + 1))" "${DEV_NAMES[$index]:-Unnamed device}" "${DEV_ADDRS[$index]}" "${DEV_STATES[$index]}"
+    index=$((index + 1))
+  done
+}
+
+service_state() {
+  # Prints running, loaded, stopped or missing.
+  local output state
+  if output="$("$LAUNCHCTL" print "$SERVICE" 2>/dev/null)"; then
+    state="$(/usr/bin/printf '%s\n' "$output" | /usr/bin/sed -n 's/^	state = //p' | /usr/bin/head -n 1)"
+    if [ "$state" = running ]; then /usr/bin/printf 'running\n'; else /usr/bin/printf 'loaded\n'; fi
+  elif [ -e "$PLIST" ]; then
+    /usr/bin/printf 'stopped\n'
+  else
+    /usr/bin/printf 'missing\n'
+  fi
+}
+
+service_loaded() { "$LAUNCHCTL" print "$SERVICE" >/dev/null 2>&1; }
+
+read_power_now() {
+  case "$(/usr/bin/pmset -g ps 2>/dev/null | /usr/bin/head -n 1 || true)" in
+    *"'AC Power'"*) /usr/bin/printf 'ac\n' ;;
+    *"'Battery Power'"*) /usr/bin/printf 'battery\n' ;;
+    *) /usr/bin/printf 'unknown\n' ;;
+  esac
+}
+
+rule_text() {
+  case "$1" in
+    source) /usr/bin/printf 'Reconnect when "%s" is attached and the Mac is on power' "$2" ;;
+    any_power) /usr/bin/printf 'Reconnect whenever the Mac is on external power' ;;
+    disconnect_only) /usr/bin/printf 'Disconnect when you leave; never reconnect automatically' ;;
+    *) /usr/bin/printf 'Unknown rule' ;;
+  esac
+}
+
+watcher_path() {
+  if [ -x "$APP_DIR/watch-power" ]; then /usr/bin/printf '%s\n' "$APP_DIR/watch-power"
+  else /usr/bin/printf '%s\n' "$SCRIPT_DIR/watch-power"; fi
+}
+
+# ---------------------------------------------------------------- commands
+
+usage() {
+  cat <<'EOF'
+uncordex - disconnect your Bluetooth speaker when you leave your desk,
+           and reconnect it when you come back.
+
+Usage: uncordex [command] [options]
+
+Start here:
+  uncordex setup              Pick your speaker and rule, then start it
+
+Everyday:
+  uncordex                    Show status (same as 'uncordex status')
+  uncordex status             Service, speaker, power and restore state
+  uncordex stop               Turn it off (stays off until 'uncordex start')
+  uncordex start              Turn it back on
+  uncordex restart            Restart the background service
+  uncordex logs [-f]          Show recent log lines (-f keeps following)
+
+Look things up (changes nothing):
+  uncordex devices            List paired Bluetooth devices
+  uncordex sources            List docks and chargers Uncordex can recognise
+
+Remove:
+  uncordex uninstall          Remove the service and this command; keep settings
+  uncordex uninstall --purge  Also delete settings, state and logs
+
+Setup options:
+  SPEAKER                     Speaker number from 'uncordex devices', or its
+                              address such as AA-BB-CC-DD-EE-FF
+  --source N                  Reconnect when dock/charger N from
+                              'uncordex sources' is attached (best choice)
+  --any-power                 Reconnect whenever the Mac is on any power
+  --disconnect-only           Disconnect when you leave; never reconnect
+  --dry-run                   Show what would happen; change nothing
+  -y, --yes                   Do not ask for confirmation
+
+Examples:
+  uncordex setup
+  uncordex setup 1 --source 1 --yes
+  uncordex setup AA-BB-CC-DD-EE-FF --any-power --dry-run
+EOF
+}
+
+cmd_devices() {
+  [ "$#" -eq 0 ] || fail "'devices' takes no options." "Run: uncordex devices"
+  load_saved_config
+  BLUEUTIL_PATH="$(find_blueutil || true)"
+  need_blueutil
+  read_paired || fail "could not read paired Bluetooth devices." "$BLUETOOTH_HINT"
+  if [ "${#DEV_ADDRS[@]}" -eq 0 ]; then
+    say "No paired Bluetooth devices found." "Pair your speaker in System Settings > Bluetooth first."
+    return 0
+  fi
+  say "Paired Bluetooth devices:"
+  print_paired
+  [ -z "$SAVED_MAC" ] || say "" "* = the speaker Uncordex controls now"
+}
+
+cmd_sources() {
+  local index
+  [ "$#" -eq 0 ] || fail "'sources' takes no options." "Run: uncordex sources"
+  discover_sources || fail "could not read connected hardware; no dock or charger can be listed." "Try again in a few seconds."
+  if [ "${#SOURCE_KEYS[@]}" -eq 0 ]; then
+    say "No recognisable dock or charger is connected." \
+      "Connect the dock or charger you use at your desk and run this again," \
+      "or set up with --any-power or --disconnect-only."
+    return 0
+  fi
+  say "Docks and chargers connected now:"
+  index=0
+  while [ "$index" -lt "${#SOURCE_KEYS[@]}" ]; do
+    /usr/bin/printf '  %2s) %-32s %-12s %s\n' "$((index + 1))" "${SOURCE_LABELS[$index]}" "${SOURCE_KINDS[$index]}" "$(mask_key "${SOURCE_KEYS[$index]}")"
+    index=$((index + 1))
+  done
+  say "" "Use one with:  uncordex setup --source 1"
+}
+
+SELECTED_MODE=""; SELECTED_KIND=""; SELECTED_KEY=""; SELECTED_LABEL=""
+
+select_source() {
+  # select_source N|KEY
+  local wanted index
+  wanted="$1"
+  discover_sources || fail "could not read connected hardware; setup was not changed." "Try again in a few seconds."
+  case "$wanted" in
+    ''|*[!0-9]*)
+      index=0
+      while [ "$index" -lt "${#SOURCE_KEYS[@]}" ]; do
+        [ "${SOURCE_KEYS[$index]}" = "$wanted" ] && break
+        index=$((index + 1))
+      done
+      ;;
+    *) index=$((wanted - 1)) ;;
+  esac
+  if [ "$index" -lt 0 ] || [ "$index" -ge "${#SOURCE_KEYS[@]}" ]; then
+    fail "dock or charger '$wanted' is not connected now (or is not unique)." \
+      "Connect it, then run 'uncordex sources' and use the number shown."
+  fi
+  SELECTED_MODE=source
+  SELECTED_KIND="${SOURCE_KINDS[$index]}"
+  SELECTED_KEY="${SOURCE_KEYS[$index]}"
+  SELECTED_LABEL="${SOURCE_LABELS[$index]}"
+}
+
+saved_rule_usable() {
+  [ "$CONFIG_LOAD_OK" -eq 1 ] || return 1
+  case "$SAVED_MODE" in
+    source)
+      case "$SAVED_KIND" in thunderbolt|usb|adapter) ;; *) return 1 ;; esac
+      [ "${#SAVED_KEY}" -eq 64 ] || return 1
+      case "$SAVED_KEY" in *[!0-9a-f]*) return 1 ;; esac
+      ;;
+    any_power|disconnect_only) ;;
+    *) return 1 ;;
+  esac
+}
+
+keep_saved_rule() {
+  SELECTED_MODE="$SAVED_MODE"; SELECTED_KIND="$SAVED_KIND"; SELECTED_KEY="$SAVED_KEY"; SELECTED_LABEL="$SAVED_LABEL"
+}
+
+guided_rule() {
+  local index default choice
+  discover_sources || fail "could not read connected hardware; setup was not changed." "Try again in a few seconds."
+  say "" "When should Uncordex reconnect the speaker?"
+  index=0
+  while [ "$index" -lt "${#SOURCE_KEYS[@]}" ]; do
+    /usr/bin/printf '  %s) When "%s" is attached (recommended)\n' "$((index + 1))" "${SOURCE_LABELS[$index]}"
+    index=$((index + 1))
+  done
+  [ "${#SOURCE_KEYS[@]}" -gt 0 ] || say "  (No recognisable dock or charger is connected now.)"
+  say "  a) Whenever the Mac is on any power" "  d) Never; only disconnect when I leave"
+  default=""
+  if saved_rule_usable; then
+    say "  k) Keep the current rule: $(rule_text "$SAVED_MODE" "$SAVED_LABEL")"
+    default=k
+  elif [ "${#SOURCE_KEYS[@]}" -eq 1 ]; then
+    default=1
+  fi
+  say "  q) Cancel"
+  if [ -n "$default" ]; then ask "Choose [$default]: "; else ask "Choose: "; fi
+  [ -n "$ANSWER" ] || ANSWER="$default"
+  case "$ANSWER" in
+    a|A) SELECTED_MODE=any_power; SELECTED_LABEL="Any external power" ;;
+    d|D) SELECTED_MODE=disconnect_only; SELECTED_LABEL="Disconnect only" ;;
+    k|K) saved_rule_usable || fail "invalid choice; setup cancelled and nothing was changed."; keep_saved_rule ;;
+    q|Q|"") fail "setup cancelled; nothing was changed." ;;
+    *[!0-9]*) fail "invalid choice '$ANSWER'; setup cancelled and nothing was changed." ;;
+    *)
+      choice=$((ANSWER - 1))
+      [ "$choice" -ge 0 ] && [ "$choice" -lt "${#SOURCE_KEYS[@]}" ] || fail "invalid choice '$ANSWER'; setup cancelled and nothing was changed."
+      SELECTED_MODE=source
+      SELECTED_KIND="${SOURCE_KINDS[$choice]}"
+      SELECTED_KEY="${SOURCE_KEYS[$choice]}"
+      SELECTED_LABEL="${SOURCE_LABELS[$choice]}"
+      ;;
+  esac
+}
+
+SPEAKER_MAC=""; SPEAKER_LABEL=""
+
+speaker_from_number() {
+  local index
+  read_paired || fail "could not read paired Bluetooth devices." "$BLUETOOTH_HINT"
+  index=$(($1 - 1))
+  if [ "$index" -lt 0 ] || [ "$index" -ge "${#DEV_ADDRS[@]}" ]; then
+    fail "there is no paired device number $1." "Run 'uncordex devices' to see the numbers."
+  fi
+  SPEAKER_MAC="${DEV_ADDRS[$index]}"
+  SPEAKER_LABEL="${DEV_NAMES[$index]}"
+}
+
+guided_speaker() {
+  local index default
+  read_paired || fail "could not read paired Bluetooth devices." "$BLUETOOTH_HINT"
+  [ "${#DEV_ADDRS[@]}" -gt 0 ] || fail "no paired Bluetooth devices found." "Pair your speaker in System Settings > Bluetooth, then run: uncordex setup"
+  say "Which speaker should Uncordex control?"
+  print_paired
+  default=""
+  index=0
+  while [ "$index" -lt "${#DEV_ADDRS[@]}" ]; do
+    [ "${DEV_ADDRS[$index]}" != "$(normal_address "$SAVED_MAC")" ] || default=$((index + 1))
+    index=$((index + 1))
+  done
+  [ -n "$default" ] || [ "${#DEV_ADDRS[@]}" -ne 1 ] || default=1
+  if [ -n "$default" ]; then ask "Choose [$default]: "; else ask "Choose: "; fi
+  [ -n "$ANSWER" ] || ANSWER="$default"
+  case "$ANSWER" in
+    q|Q|"") fail "setup cancelled; nothing was changed." ;;
+    *[!0-9]*)
+      valid_address "$ANSWER" || fail "invalid choice '$ANSWER'; setup cancelled and nothing was changed."
+      SPEAKER_MAC="$(normal_address "$ANSWER")"; SPEAKER_LABEL="$(paired_name "$SPEAKER_MAC" || true)" ;;
+    *) speaker_from_number "$ANSWER" ;;
+  esac
+}
+
+cmd_setup() {
+  local requested_speaker requested_source request_any request_disconnect mode_count dry_run assume_yes
+  local stage stage_plist copy_runtime legacy_label service_was_loaded backup_dir
+  local had_watcher had_library had_config had_plist
+  requested_speaker=""; requested_source=""; request_any=0; request_disconnect=0
+  mode_count=0; dry_run=0; assume_yes=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --source)
+        [ "$#" -ge 2 ] || fail "--source needs a number or key." "Run 'uncordex sources' to see the numbers."
+        requested_source="$2"; mode_count=$((mode_count + 1)); shift 2 ;;
+      --any-power) request_any=1; mode_count=$((mode_count + 1)); shift ;;
+      --disconnect-only) request_disconnect=1; mode_count=$((mode_count + 1)); shift ;;
+      --dry-run) dry_run=1; shift ;;
+      -y|--yes) assume_yes=1; shift ;;
+      -h|--help) usage; return 0 ;;
+      -*) fail "unknown setup option: $1" "Run 'uncordex help' to see the options." ;;
+      *)
+        [ -z "$requested_speaker" ] || fail "give only one speaker." "Example: uncordex setup 1 --source 1"
+        requested_speaker="$1"; shift ;;
+    esac
+  done
+  [ "$mode_count" -le 1 ] || fail "choose only one rule: --source, --any-power or --disconnect-only."
+
+  "$PLUTIL" -help 2>&1 | /usr/bin/grep -q -- '-extract' || fail "this macOS version is too old; Uncordex needs macOS 13 or newer."
+  load_saved_config
+  BLUEUTIL_PATH="$(find_blueutil || true)"
+  need_blueutil
+
+  # Speaker
+  case "$requested_speaker" in
+    "")
+      if is_interactive; then
+        guided_speaker
+      elif [ -n "$SAVED_MAC" ] && [ "$CONFIG_LOAD_OK" -eq 1 ]; then
+        SPEAKER_MAC="$SAVED_MAC"; SPEAKER_LABEL="$SAVED_NAME"
+      else
+        fail "tell setup which speaker to use." "Example: uncordex setup AA-BB-CC-DD-EE-FF --any-power" "Run 'uncordex devices' to see your paired devices."
+      fi
+      ;;
+    *[!0-9]*)
+      valid_address "$requested_speaker" || fail "'$requested_speaker' is not a speaker address or number." \
+        "Use a number from 'uncordex devices' or an address like AA-BB-CC-DD-EE-FF."
+      SPEAKER_MAC="$(normal_address "$requested_speaker")"
+      SPEAKER_LABEL=""
+      if read_paired 2>/dev/null; then SPEAKER_LABEL="$(paired_name "$SPEAKER_MAC" || true)"; fi
+      [ -n "$SPEAKER_LABEL" ] || [ "$SPEAKER_MAC" != "$(normal_address "$SAVED_MAC")" ] || SPEAKER_LABEL="$SAVED_NAME"
+      ;;
+    *) speaker_from_number "$requested_speaker" ;;
+  esac
+
+  # Rule
+  if [ -n "$requested_source" ]; then
+    select_source "$requested_source"
+  elif [ "$request_any" -eq 1 ]; then
+    SELECTED_MODE=any_power; SELECTED_LABEL="Any external power"
+  elif [ "$request_disconnect" -eq 1 ]; then
+    SELECTED_MODE=disconnect_only; SELECTED_LABEL="Disconnect only"
+  elif is_interactive; then
+    guided_rule
+  elif saved_rule_usable; then
+    keep_saved_rule
+  else
+    fail "choose when to reconnect: add --source N, --any-power or --disconnect-only." \
+      "Run 'uncordex sources' to see docks and chargers you can use with --source."
+  fi
+
+  say "" "Speaker: ${SPEAKER_LABEL:-Speaker} ($SPEAKER_MAC)" \
+    "Rule:    $(rule_text "$SELECTED_MODE" "$SELECTED_LABEL")" \
+    "Uncordex disconnects the speaker when you unplug, and only reconnects it if Uncordex disconnected it."
+
+  stage="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/uncordex-setup.XXXXXX")" || exit 1
+  # shellcheck disable=SC2064
+  trap "/bin/rm -rf '$stage'" EXIT HUP INT TERM
+  /bin/mkdir -p "$stage/lib"
+  /usr/bin/install -m 755 "$SCRIPT_DIR/watch-power" "$stage/watch-power"
+  /usr/bin/install -m 644 "$SCRIPT_DIR/lib/source.sh" "$stage/lib/source.sh"
+  printf 'CONFIG_VERSION=1\nDEVICE_MAC=%q\nSPEAKER_NAME=%q\nBLUEUTIL=%q\nRECONNECT_MODE=%q\nSOURCE_KIND=%q\nSOURCE_KEY=%q\nSOURCE_LABEL=%q\n' \
+    "$SPEAKER_MAC" "$SPEAKER_LABEL" "$BLUEUTIL_PATH" "$SELECTED_MODE" "$SELECTED_KIND" "$SELECTED_KEY" "$SELECTED_LABEL" >"$stage/config"
+  /bin/chmod 600 "$stage/config"
+  stage_plist="$stage/service.plist"
+  "$PLUTIL" -create xml1 "$stage_plist"
+  "$PLUTIL" -insert Label -string "$LABEL" "$stage_plist"
+  "$PLUTIL" -insert ProgramArguments -array "$stage_plist"
+  "$PLUTIL" -insert ProgramArguments.0 -string "$APP_DIR/watch-power" "$stage_plist"
+  "$PLUTIL" -insert RunAtLoad -bool true "$stage_plist"
+  "$PLUTIL" -insert KeepAlive -bool true "$stage_plist"
+  "$PLUTIL" -insert StandardOutPath -string "$LOG_FILE" "$stage_plist"
+  "$PLUTIL" -insert StandardErrorPath -string "$ERROR_LOG_FILE" "$stage_plist"
+  if [ -n "${XDG_CONFIG_HOME:-}${XDG_STATE_HOME:-}" ]; then
+    "$PLUTIL" -insert EnvironmentVariables -dictionary "$stage_plist"
+    [ -z "${XDG_CONFIG_HOME:-}" ] || "$PLUTIL" -insert EnvironmentVariables.XDG_CONFIG_HOME -string "$XDG_CONFIG_HOME" "$stage_plist"
+    [ -z "${XDG_STATE_HOME:-}" ] || "$PLUTIL" -insert EnvironmentVariables.XDG_STATE_HOME -string "$XDG_STATE_HOME" "$stage_plist"
+  fi
+  /bin/bash -n "$stage/watch-power" "$stage/lib/source.sh" || exit 1
+  "$PLUTIL" -lint "$stage_plist" >/dev/null || exit 1
+
+  if [ "$dry_run" -eq 1 ]; then
+    say "" "Dry run: nothing was changed. Run the same command without --dry-run to apply it."
+    return 0
+  fi
+  if is_interactive && [ "$assume_yes" -eq 0 ]; then
+    ask "Save and start? [Y/n] "
+    case "$ANSWER" in ""|y|Y|yes|YES|Yes) ;; *) fail "setup cancelled; nothing was changed." ;; esac
+  fi
+
+  for legacy_label in com.unplugged-speaker.watch-power com.bolyki.bt-auto-speaker-power; do
+    if "$LAUNCHCTL" print "gui/$USER_ID/$legacy_label" >/dev/null 2>&1; then
+      fail "an older speaker watcher ($legacy_label) is running, so nothing was changed." \
+        "Two watchers would fight over the speaker. Stop it first:" \
+        "launchctl bootout gui/$USER_ID/$legacy_label" \
+        "Then run 'uncordex setup' again. See docs/migration.md for details."
+    fi
+  done
+
+  # Copy watcher files only when running from a checkout, not the installed copy.
+  copy_runtime=1
+  if [ -d "$APP_DIR" ] && [ "$(cd -P "$APP_DIR" && pwd)" = "$SCRIPT_DIR" ]; then copy_runtime=0; fi
+  service_was_loaded=0
+  if service_loaded; then service_was_loaded=1; fi
+
+  backup_dir="$STATE_DIR/install-backups/$(/bin/date '+%Y%m%d-%H%M%S')-$$"
+  /bin/mkdir -p "$backup_dir"
+  had_watcher=0; had_library=0; had_config=0; had_plist=0
+  if [ "$copy_runtime" -eq 1 ]; then
+    if [ -e "$APP_DIR/watch-power" ]; then /bin/cp -p "$APP_DIR/watch-power" "$backup_dir/watch-power"; had_watcher=1; fi
+    if [ -e "$APP_DIR/lib/source.sh" ]; then /bin/cp -p "$APP_DIR/lib/source.sh" "$backup_dir/source.sh"; had_library=1; fi
+  fi
+  if [ -e "$CONFIG_FILE" ]; then /bin/cp -p "$CONFIG_FILE" "$backup_dir/config"; had_config=1; fi
+  if [ -e "$PLIST" ]; then /bin/cp -p "$PLIST" "$backup_dir/service.plist"; had_plist=1; fi
+
+  restore_previous() {
+    "$LAUNCHCTL" bootout "gui/$USER_ID" "$PLIST" >/dev/null 2>&1 || true
+    if [ "$copy_runtime" -eq 1 ]; then
+      if [ "$had_watcher" -eq 1 ]; then /bin/cp -p "$backup_dir/watch-power" "$APP_DIR/watch-power"; else /bin/rm -f "$APP_DIR/watch-power"; fi
+      if [ "$had_library" -eq 1 ]; then /bin/cp -p "$backup_dir/source.sh" "$APP_DIR/lib/source.sh"; else /bin/rm -f "$APP_DIR/lib/source.sh"; fi
+    fi
+    if [ "$had_config" -eq 1 ]; then /bin/cp -p "$backup_dir/config" "$CONFIG_FILE"; else /bin/rm -f "$CONFIG_FILE"; fi
+    if [ "$had_plist" -eq 1 ]; then
+      /bin/cp -p "$backup_dir/service.plist" "$PLIST"
+      if [ "$service_was_loaded" -eq 1 ]; then "$LAUNCHCTL" bootstrap "gui/$USER_ID" "$PLIST" >/dev/null 2>&1 || true; fi
+    else
+      /bin/rm -f "$PLIST"
+    fi
+  }
+
+  /bin/mkdir -p "$APP_DIR/lib" "$CONFIG_DIR" "$(/usr/bin/dirname "$PLIST")" "$LOG_DIR" || fail "could not create Uncordex folders; nothing was changed."
+  if [ "$service_was_loaded" -eq 1 ]; then
+    "$LAUNCHCTL" bootout "gui/$USER_ID" "$PLIST" || fail "the running Uncordex service could not be stopped; nothing was changed." "Try again, or run: uncordex restart"
+  else
+    "$LAUNCHCTL" bootout "gui/$USER_ID" "$PLIST" >/dev/null 2>&1 || true
+  fi
+  if { [ "$copy_runtime" -eq 1 ] && { ! /usr/bin/install -m 755 "$stage/watch-power" "$APP_DIR/watch-power" ||
+       ! /usr/bin/install -m 644 "$stage/lib/source.sh" "$APP_DIR/lib/source.sh"; }; } ||
+     ! /usr/bin/install -m 600 "$stage/config" "$CONFIG_FILE" ||
+     ! /usr/bin/install -m 644 "$stage_plist" "$PLIST"; then
+    restore_previous
+    fail "setup failed; your previous setup was restored from $backup_dir"
+  fi
+  "$LAUNCHCTL" enable "$SERVICE" >/dev/null 2>&1 || true
+  if ! "$LAUNCHCTL" bootstrap "gui/$USER_ID" "$PLIST"; then
+    restore_previous
+    fail "the background service could not start; your previous setup was restored from $backup_dir" "Check 'uncordex logs', then run 'uncordex setup' again."
+  fi
+  say "" "Done. Uncordex is running and starts automatically when you log in." "Check it any time with:  uncordex status"
+}
+
+cmd_status() {
+  local state power source connected reason watcher
+  [ "$#" -eq 0 ] || fail "'status' takes no options." "Run: uncordex status"
+  load_saved_config
+  state="$(service_state)"
+  if [ "$CONFIG_PRESENT" -eq 0 ]; then
+    say "Uncordex $VERSION is installed but not set up yet." "" "Run:  uncordex setup"
+    return 0
+  fi
+  if [ "$CONFIG_LOAD_OK" -ne 1 ] || ! valid_address "$SAVED_MAC" || ! saved_rule_usable; then
+    say "The saved setup at $CONFIG_FILE is damaged." "" "Run:  uncordex setup"
+    return 1
+  fi
+  case "$state" in
+    running) say "Service: running" ;;
+    loaded) say "Service: loaded but not running (it may be restarting; see 'uncordex logs')" ;;
+    stopped) say "Service: stopped (turn it on with 'uncordex start')" ;;
+    *) say "Service: not installed (run 'uncordex setup')" ;;
+  esac
+  BLUEUTIL_PATH="$(find_blueutil || true)"
+  connected="state unknown"
+  if [ -n "$BLUEUTIL_PATH" ]; then
+    case "$("$BLUEUTIL_PATH" --is-connected "$SAVED_MAC" 2>/dev/null || true)" in
+      1) connected=connected ;;
+      0) connected="not connected" ;;
+    esac
+  else
+    connected="state unknown (blueutil is missing: brew install blueutil)"
+  fi
+  say "Speaker: ${SAVED_NAME:-Speaker} ($SAVED_MAC), $connected"
+  say "Rule:    $(rule_text "$SAVED_MODE" "$SAVED_LABEL")"
+  power="$(read_power_now)"
+  case "$power" in ac) say "Power:   on external power" ;; battery) say "Power:   on battery" ;; *) say "Power:   unknown" ;; esac
+  if [ "$SAVED_MODE" = source ]; then
+    source="$(source_presence "$SAVED_KIND" "$SAVED_KEY")"
+    case "$source" in match) say "Dock:    attached" ;; absent) say "Dock:    not attached" ;; *) say "Dock:    unknown" ;; esac
+  fi
+  watcher="$(watcher_path)"
+  reason="$(UNCORDEX_WATCHER_LIBRARY_ONLY=0 UNCORDEX_CONFIG_FILE="$CONFIG_FILE" UNCORDEX_STATE_DIR="$STATE_DIR" UNCORDEX_STATE_FILE="$STATE_DIR/runtime-state" \
+    "$watcher" --status 2>/dev/null | /usr/bin/sed -n 's/^reason: //p' || true)"
+  say "Restore: ${reason:-unknown}"
+}
+
+need_setup() {
+  [ -r "$CONFIG_FILE" ] && [ -e "$PLIST" ] || fail "Uncordex is not set up yet." "Run: uncordex setup"
+}
+
+cmd_start() {
+  [ "$#" -eq 0 ] || fail "'start' takes no options." "Run: uncordex start"
+  need_setup
+  "$LAUNCHCTL" enable "$SERVICE" >/dev/null 2>&1 || true
+  if service_loaded; then
+    if [ "$(service_state)" = running ]; then say "Uncordex is already running."; return 0; fi
+    "$LAUNCHCTL" kickstart "$SERVICE" || fail "the service could not be started." "Check 'uncordex logs' for the reason."
+  else
+    "$LAUNCHCTL" bootstrap "gui/$USER_ID" "$PLIST" || fail "the service could not be started." "Check 'uncordex logs', or run 'uncordex setup' again."
+  fi
+  say "Uncordex is on."
+}
+
+cmd_stop() {
+  [ "$#" -eq 0 ] || fail "'stop' takes no options." "Run: uncordex stop"
+  if service_loaded; then
+    "$LAUNCHCTL" bootout "$SERVICE" || fail "the service could not be stopped." "Try again in a few seconds."
+  fi
+  "$LAUNCHCTL" disable "$SERVICE" >/dev/null 2>&1 || true
+  say "Uncordex is off. It stays off, even after you log in again, until you run: uncordex start"
+}
+
+cmd_restart() {
+  [ "$#" -eq 0 ] || fail "'restart' takes no options." "Run: uncordex restart"
+  need_setup
+  if service_loaded; then
+    "$LAUNCHCTL" kickstart -k "$SERVICE" || fail "the service could not be restarted." "Check 'uncordex logs' for the reason."
+    say "Uncordex restarted."
+  else
+    cmd_start
+  fi
+}
+
+cmd_logs() {
+  local follow
+  follow=0
+  case "${1:-}" in "") ;; -f|--follow) follow=1 ;; *) fail "unknown logs option: $1" "Use: uncordex logs   or   uncordex logs -f" ;; esac
+  if [ ! -e "$LOG_FILE" ] && [ ! -e "$ERROR_LOG_FILE" ]; then
+    say "No logs yet. Uncordex writes a line only when something happens."
+    return 0
+  fi
+  if [ "$follow" -eq 1 ]; then
+    /usr/bin/touch "$LOG_FILE" "$ERROR_LOG_FILE"
+    exec /usr/bin/tail -n 20 -f "$LOG_FILE" "$ERROR_LOG_FILE"
+  fi
+  if [ -s "$LOG_FILE" ]; then say "== Events ($LOG_FILE)"; /usr/bin/tail -n 30 "$LOG_FILE"; fi
+  if [ -s "$ERROR_LOG_FILE" ]; then say "== Problems ($ERROR_LOG_FILE)"; /usr/bin/tail -n 30 "$ERROR_LOG_FILE"; fi
+  if [ ! -s "$LOG_FILE" ] && [ ! -s "$ERROR_LOG_FILE" ]; then say "No log lines yet."; fi
+}
+
+cmd_uninstall() {
+  local purge link_target file
+  purge=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in --purge) purge=1; shift ;; *) fail "unknown uninstall option: $1" "Use: uncordex uninstall   or   uncordex uninstall --purge" ;; esac
+  done
+  if service_loaded; then
+    "$LAUNCHCTL" bootout "$SERVICE" || fail "Uncordex is still running, so nothing was removed." "Try again in a few seconds."
+  fi
+  "$LAUNCHCTL" enable "$SERVICE" >/dev/null 2>&1 || true
+  /bin/rm -f "$PLIST"
+  for file in uncordex watch-power lib/source.sh VERSION; do /bin/rm -f "$APP_DIR/$file"; done
+  /bin/rmdir "$APP_DIR/lib" "$APP_DIR" 2>/dev/null || true
+  if [ -L "$BIN_DIR/uncordex" ]; then
+    link_target="$(/usr/bin/readlink "$BIN_DIR/uncordex")"
+    [ "$link_target" != "$APP_DIR/uncordex" ] || /bin/rm -f "$BIN_DIR/uncordex"
+  fi
+  if [ "$purge" -eq 1 ]; then
+    /bin/rm -f "$CONFIG_FILE" "$STATE_DIR/runtime-state" "$LOG_FILE" "$ERROR_LOG_FILE"
+    /bin/rm -rf "$STATE_DIR/install-backups"
+    /bin/rmdir "$CONFIG_DIR" "$STATE_DIR" 2>/dev/null || true
+    say "Uncordex is removed, including its settings and logs."
+  else
+    say "Uncordex is removed. Your settings were kept, so a reinstall picks up where you left off:" \
+      "  $CONFIG_DIR" "  $STATE_DIR" \
+      "Delete those folders if you no longer need them."
+  fi
+}
+
+# ---------------------------------------------------------------- main
+
+command_name="${1:-}"
+[ "$#" -eq 0 ] || shift
+case "$command_name" in
+  "") cmd_status ;;
+  setup) cmd_setup "$@" ;;
+  status) cmd_status "$@" ;;
+  start) cmd_start "$@" ;;
+  stop) cmd_stop "$@" ;;
+  restart) cmd_restart "$@" ;;
+  logs) cmd_logs "$@" ;;
+  devices) cmd_devices "$@" ;;
+  sources) cmd_sources "$@" ;;
+  uninstall) cmd_uninstall "$@" ;;
+  help|-h|--help) usage ;;
+  version|-v|--version) say "uncordex $VERSION" ;;
+  *) fail "unknown command: $command_name" "Run 'uncordex help' to see the commands." ;;
+esac

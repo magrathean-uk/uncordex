@@ -1,124 +1,92 @@
 <h1 align="center">Uncordex</h1>
 
-<p align="center">A native macOS controller that disconnects one paired Bluetooth speaker when your saved desk setup departs, then restores only a connection it previously disconnected.</p>
+<p align="center">Disconnects your Bluetooth speaker when you leave your desk and reconnects it when you come back.</p>
 
 <p align="center">
   <a href="docs/index.md">Documentation</a>
 </p>
 
-## Overview
+Uncordex is a small command-line tool for macOS. A per-user background service watches your power and dock, disconnects one already-paired Bluetooth speaker when you leave, and reconnects it when you return. Everything stays on your Mac: no account, cloud service or telemetry.
 
-Uncordex combines a native AppKit app with a per-user LaunchAgent. It runs locally on macOS 13 or newer, on Apple Silicon and Intel, keeps configuration on the Mac, and uses [blueutil](https://github.com/toy/blueutil) to control a speaker already paired with macOS. It has no account, cloud service, telemetry, automatic pairing, Bluetooth-radio control, audio-output switching, or system daemon.
+## Install
 
-## Features
+```bash
+curl -fsSL https://raw.githubusercontent.com/magrathean-uk/uncordex/main/install.sh | bash
+```
 
-- Controls one already-paired Bluetooth speaker; manual connections and disconnections are always respected.
-- Three reconnection rules: a saved power source, any external power, or disconnect only.
-- Restores a connection only after verifying that Uncordex itself disconnected it, rather than continually forcing a preferred state.
-- Native AppKit app with Overview, Speaker & Rule, and Diagnostics views.
-- Script-free macOS Installer package that installs the universal app in `/Applications`.
+Or from a clone:
 
-## How it works
+```bash
+git clone https://github.com/magrathean-uk/uncordex.git && cd uncordex && ./install.sh
+```
 
-1. Choose one paired Bluetooth speaker.
-2. Choose a reconnection rule: one saved power source, any external power, or disconnect only.
-3. The watcher samples power and source identity every five seconds.
-4. After a confirmed departure, it disconnects the speaker and records ownership only after verifying that the disconnect succeeded.
-5. When the selected setup returns, it reconnects only while that ownership remains valid.
+The installer copies Uncordex to `~/.local/share/uncordex`, links `~/.local/bin/uncordex`, and installs `blueutil` with Homebrew if it is missing. It does not change your speaker settings.
 
-### Reconnection rules
+## Quick start
 
-- **Saved source:** reconnect while AC is present and an exact saved Thunderbolt/USB4 device, serialized USB hub, or serialized power adapter is present.
-- **Any external power:** reconnect after an observed battery-to-AC return. Use this only if every charger is acceptable.
-- **Disconnect only:** disconnect on departure and never reconnect automatically.
+```bash
+uncordex setup     # pick your speaker and a rule, then start it
+uncordex status    # see what it is doing
+```
 
-A saved dock is a presence rule. If another charger already keeps the Mac on AC, attaching the saved dock can make restoration eligible. A different charger cannot satisfy the saved source identity.
+## Commands
 
-## Getting started
+| Command | What it does |
+| --- | --- |
+| `uncordex setup` | Pick your speaker and rule, then start the service |
+| `uncordex status` | Service, speaker, power and restore state (also plain `uncordex`) |
+| `uncordex stop` | Turn it off; it stays off until `uncordex start` |
+| `uncordex start` | Turn it back on |
+| `uncordex restart` | Restart the background service |
+| `uncordex logs [-f]` | Show recent log lines; `-f` keeps following |
+| `uncordex devices` | List paired Bluetooth devices |
+| `uncordex sources` | List docks and chargers Uncordex can recognise |
+| `uncordex uninstall` | Remove the service and command; keep settings |
+| `uncordex uninstall --purge` | Also delete settings, state and logs |
 
-### Requirements
+Setup takes the speaker as a number from `uncordex devices` or its address, plus one rule:
 
-- macOS 13 or newer on Apple Silicon or Intel.
-- A logged-in macOS user session.
+| Rule | Behaviour |
+| --- | --- |
+| `--source N` | Reconnect when dock or charger N from `uncordex sources` is attached. Recommended. |
+| `--any-power` | Reconnect whenever the Mac is on any power. |
+| `--disconnect-only` | Disconnect when you leave; never reconnect. |
+
+Other setup options: `--dry-run` (show what would happen, change nothing) and `-y`, `--yes` (do not ask for confirmation).
+
+## How it behaves
+
+- It samples power and dock state every 5 seconds.
+- It disconnects the speaker only after a confirmed departure.
+- It reconnects only a connection it disconnected itself.
+- Manual connects and disconnects are respected.
+- It makes at most 6 reconnect attempts in 5 minutes.
+
+## Examples
+
+```bash
+uncordex setup                                   # guided, with numbered choices
+uncordex setup 1 --source 1 --yes                # non-interactive
+uncordex setup AA-BB-CC-DD-EE-FF --any-power     # by address
+uncordex setup 1 --source 1 --dry-run            # preview only
+uncordex stop                                    # off, and stays off across logins
+uncordex start
+uncordex logs -f
+uncordex uninstall                               # keeps your settings
+uncordex uninstall --purge                       # removes everything
+```
+
+## Requirements
+
+- macOS 13 or newer, on Apple Silicon or Intel.
 - A Bluetooth speaker already paired with the Mac.
-- Homebrew and `blueutil`, installed separately:
+- Homebrew, for `blueutil`. `install.sh` installs `blueutil` automatically.
 
-  ```bash
-  brew install blueutil
-  ```
-
-### Install the app
-
-Build the app and macOS package from source using the steps in [package guidance](docs/pkg.md). If you use a published package, check its release notes for the artifact and its stated signing status. After installation, open **Uncordex** from Applications, then open **Speaker & Rule**. Find paired devices and eligible sources, choose a speaker and rule, select **Preview**, then select **Save & Start**.
-
-The package places the app in `/Applications`. Package installation alone does not start a service, control Bluetooth, install dependencies, or create user configuration. App upgrades preserve existing configuration, state, logs, and LaunchAgent files. See [installation](docs/installation.md) and [package details](docs/pkg.md).
-
-### Install from source
-
-Connect the dock or charger that should qualify restoration, then discover stable source identities:
-
-```bash
-git clone https://github.com/magrathean-uk/uncordex.git
-cd uncordex
-brew install blueutil
-./install.sh --discover
-```
-
-Discovery is read-only. Start guided setup with the speaker's Bluetooth address:
-
-```bash
-./install.sh AA-BB-CC-DD-EE-FF
-```
-
-For noninteractive setup, choose exactly one rule:
-
-```bash
-./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY
-./install.sh AA-BB-CC-DD-EE-FF --any-power
-./install.sh AA-BB-CC-DD-EE-FF --disconnect-only
-```
-
-Preview source setup without persistent writes, service changes, or Bluetooth actions:
-
-```bash
-./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY --dry-run
-```
-
-### Status and removal
-
-The app's **Overview** shows service status, saved setup, current power/source readings, and automatic restore state. **Diagnostics** shows watcher observations, dependency status, and log access. From a source checkout or installed service, inspect status and logs with:
-
-```bash
-"${XDG_DATA_HOME:-$HOME/.local/share}/uncordex/watch-power" --status
-launchctl print "gui/$(id -u)/uk.magrathean.uncordex.watch-power"
-tail -f ~/Library/Logs/uncordex.log
-tail -f ~/Library/Logs/uncordex-error.log
-```
-
-Use the app's **Stop** control to stop the service while preserving its files. From a source checkout, this command stops the canonical LaunchAgent and removes its property list:
-
-```bash
-./uninstall.sh
-```
-
-Configuration, runtime state, backups, and logs remain available after removal. See [usage](docs/usage.md) and [troubleshooting](docs/troubleshooting.md).
+The first time, macOS may ask to allow Bluetooth access for your terminal app. If it was blocked, allow it in System Settings > Privacy & Security > Bluetooth.
 
 ## Documentation
 
-- [Documentation index](docs/index.md)
-- [Installation](docs/installation.md)
-- [Usage](docs/usage.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Migration from older watchers](docs/migration.md)
-- [Architecture](docs/architecture.md)
-- [Development and verification](docs/development.md)
-- [Release process](docs/releasing.md)
-- [Changelog](CHANGELOG.md)
-- [Contributing](.github/CONTRIBUTING.md)
-- [Security policy](.github/SECURITY.md)
-- [Support](.github/SUPPORT.md)
-
-Automated suites use fixture hardware snapshots and substitute Bluetooth, clock, process, and LaunchAgent boundaries. They do not touch real devices or services and cannot prove behavior on a particular Mac, dock, charger, or speaker. The [2026-09-09 live acceptance record](docs/testing/2026-09-09-live-acceptance.md) covers one Bose/ASUS setup on one Mac. macOS 13 runtime behavior, Intel runtime behavior, sleep/wake, reboot/login, and other hardware combinations remain separate acceptance work.
+See the [documentation index](docs/index.md) for troubleshooting, migration, architecture and development notes.
 
 ## Licence
 

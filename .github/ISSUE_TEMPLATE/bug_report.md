@@ -19,7 +19,7 @@ List the steps and reconnection rule. Say whether this used fixtures or real har
 - Uncordex version or source commit:
 - macOS version:
 - Apple Silicon or Intel:
-- App/package or source installation:
+- Installed with install.sh (one-line or from a clone):
 
 ## Relevant diagnostics
 

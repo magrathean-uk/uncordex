@@ -1,5 +1,0 @@
-Install Uncordex
-
-Uncordex disconnects a paired Bluetooth speaker when its saved desk setup departs, then restores only a connection it previously disconnected.
-
-This installer places the universal Uncordex.app in Applications on macOS 13 or newer. Installation does not start a background service, install dependencies, create user configuration, or control Bluetooth. Open the app and choose Save & Start when you are ready to configure and start the service.

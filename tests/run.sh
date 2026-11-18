@@ -460,8 +460,15 @@ fi
 make_fake_install_tools() {
   FAKE_BLUEUTIL="$TEST_ROOT/fake-blueutil"
   FAKE_LAUNCHCTL="$TEST_ROOT/fake-launchctl"
-  /usr/bin/printf '%s\n' '#!/bin/bash' 'exit 0' >"$FAKE_BLUEUTIL"
   # The quoted expressions belong to the generated fake, not this process.
+  # shellcheck disable=SC2016
+  /usr/bin/printf '%s\n' \
+    '#!/bin/bash' \
+    'case "${1:-}" in' \
+    '  --paired) printf "%s\\n" "address: aa-bb-cc-dd-ee-ff, not connected, not favourite, paired, name: \"Test Speaker\", recent access date: 2026-01-01" "address: 11-22-33-44-55-66, connected (master, -50 dBm), not favourite, paired, name: \"Test Keyboard\", recent access date: 2026-01-01" ;;' \
+    '  --is-connected) printf "0\\n" ;;' \
+    'esac' \
+    'exit 0' >"$FAKE_BLUEUTIL"
   # shellcheck disable=SC2016
   /usr/bin/printf '%s\n' \
     '#!/bin/bash' \
@@ -476,7 +483,8 @@ make_fake_install_tools() {
   /bin/chmod 755 "$FAKE_BLUEUTIL" "$FAKE_LAUNCHCTL"
 }
 
-run_installer() {
+# run_cli CASE [uncordex arguments...]: run the CLI against isolated paths only.
+run_cli() {
   install_case="$1"
   shift
   INSTALL_BASE="$TEST_ROOT/$install_case"
@@ -484,6 +492,7 @@ run_installer() {
   UNCORDEX_USB_SNAPSHOT="${TEST_USB_SNAPSHOT:-$FIXTURES/empty.plist}" \
   UNCORDEX_ADAPTER_SNAPSHOT="${TEST_ADAPTER_SNAPSHOT:-$FIXTURES/empty.plist}" \
   UNCORDEX_APP_DIR="$INSTALL_BASE/app" \
+  UNCORDEX_BIN_DIR="$INSTALL_BASE/bin" \
   UNCORDEX_CONFIG_DIR="$INSTALL_BASE/config" \
   UNCORDEX_STATE_DIR="$INSTALL_BASE/state" \
   UNCORDEX_PLIST="$INSTALL_BASE/LaunchAgents/service.plist" \
@@ -491,19 +500,32 @@ run_installer() {
   UNCORDEX_BLUEUTIL="$FAKE_BLUEUTIL" \
   UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" \
   UNCORDEX_LAUNCH_TRACE="$INSTALL_BASE/launch.trace" \
-  "$ROOT_DIR/install.sh" "$@"
+  "${UNCORDEX_CLI:-$ROOT_DIR/uncordex}" "$@"
+}
+
+run_installer() {
+  setup_case="$1"
+  shift
+  run_cli "$setup_case" setup "$@"
 }
 
 make_fake_install_tools
 
-gui_missing_plist="$TEST_ROOT/gui-status-missing.plist"
-run_installer gui-status-missing --gui-status-plist >"$gui_missing_plist"
-assert_eq "missing" "$(/usr/bin/plutil -extract config_state raw -n "$gui_missing_plist")" "GUI status reports missing configuration without creating it"
-if [ ! -e "$TEST_ROOT/gui-status-missing" ]; then pass "GUI status is read-only"
-else fail "GUI status is read-only"; fi
+help_output="$("$ROOT_DIR/uncordex" help 2>&1)"
+assert_contains "uncordex setup" "$help_output" "help names the setup command"
+unknown_output="$("$ROOT_DIR/uncordex" frobnicate 2>&1)"
+unknown_status=$?
+assert_ne "0" "$unknown_status" "an unknown command fails"
+assert_contains "uncordex help" "$unknown_output" "an unknown command says what to run next"
 
-gui_valid_base="$TEST_ROOT/gui-status-valid"
-/bin/mkdir -p "$gui_valid_base/config"
+status_missing_output="$(run_cli status-missing status 2>&1)"
+assert_contains "not set up" "$status_missing_output" "status explains a missing setup"
+assert_contains "uncordex setup" "$status_missing_output" "status points to setup"
+if [ ! -e "$TEST_ROOT/status-missing/config" ] && [ ! -e "$TEST_ROOT/status-missing/state" ]; then pass "status is read-only"
+else fail "status is read-only"; fi
+
+status_valid_base="$TEST_ROOT/status-valid"
+/bin/mkdir -p "$status_valid_base/config"
 /usr/bin/printf '%s\n' \
   'CONFIG_VERSION=1' \
   'DEVICE_MAC=AA-BB-CC-DD-EE-FF' \
@@ -511,27 +533,29 @@ gui_valid_base="$TEST_ROOT/gui-status-valid"
   'RECONNECT_MODE=source' \
   'SOURCE_KIND=thunderbolt' \
   "SOURCE_KEY=$dock_key" \
-  'SOURCE_LABEL=Test\ Dock' >"$gui_valid_base/config/config"
-gui_valid_plist="$TEST_ROOT/gui-status-valid.plist"
-run_installer gui-status-valid --gui-status-plist >"$gui_valid_plist"
-assert_eq "valid" "$(/usr/bin/plutil -extract config_state raw -n "$gui_valid_plist")" "GUI status validates installer-owned configuration"
-assert_eq "match" "$(/usr/bin/plutil -extract current_source raw -n "$gui_valid_plist")" "GUI status distinguishes a current source reading"
+  'SOURCE_LABEL=Test\ Dock' >"$status_valid_base/config/config"
+status_valid_output="$(run_cli status-valid 2>&1)"
+assert_contains "Test Dock" "$status_valid_output" "bare uncordex shows the saved rule"
+assert_contains "Dock:    attached" "$status_valid_output" "status reports the current dock reading"
+assert_contains "Service: not installed" "$status_valid_output" "status reports the service state"
 
-INSTALL_BASE="$TEST_ROOT/discover"
-discover_output="$(run_installer discover --discover 2>&1)"
-discover_status=$?
-assert_eq "0" "$discover_status" "read-only source discovery succeeds"
-assert_contains "Example Vendor Desk Dock" "$discover_output" "discovery displays the usable dock"
-if [ ! -e "$TEST_ROOT/discover" ]; then pass "discovery creates no persistent installation files"
-else fail "discovery creates no persistent installation files"; fi
+devices_output="$(run_cli devices devices 2>&1)"
+assert_contains " 1) Test Speaker" "$devices_output" "devices lists paired devices by number"
+
+sources_output="$(run_cli sources sources 2>&1)"
+sources_status=$?
+assert_eq "0" "$sources_status" "read-only source discovery succeeds"
+assert_contains "Example Vendor Desk Dock" "$sources_output" "sources lists the usable dock"
+if [ ! -e "$TEST_ROOT/sources" ]; then pass "sources creates no files"
+else fail "sources creates no files"; fi
 
 TEST_THUNDERBOLT_SNAPSHOT="$FIXTURES/malformed.plist"
 export TEST_THUNDERBOLT_SNAPSHOT
-discovery_failure_output="$(run_installer discovery-failure --discover 2>&1)"
+discovery_failure_output="$(run_cli discovery-failure sources 2>&1)"
 discovery_failure_status=$?
 unset TEST_THUNDERBOLT_SNAPSHOT
 assert_ne "0" "$discovery_failure_status" "hardware discovery failure is reported"
-assert_contains "Hardware discovery failed" "$discovery_failure_output" "discovery failure is explicit"
+assert_contains "could not read connected hardware" "$discovery_failure_output" "discovery failure is explicit"
 
 UNCORDEX_FORCE_INTERACTIVE=1
 export UNCORDEX_FORCE_INTERACTIVE
@@ -547,60 +571,64 @@ single_status=$?
 assert_eq "0" "$single_status" "guided setup recommends the sole exact source"
 assert_contains "Example Vendor Desk Dock" "$single_output" "guided setup previews the selected dock"
 
+guided_speaker_output="$(/usr/bin/printf '1\nd\n' | run_installer guided-speaker --dry-run 2>&1)"
+guided_speaker_status=$?
+assert_eq "0" "$guided_speaker_status" "guided setup picks a speaker by number"
+assert_contains "Test Speaker (aa-bb-cc-dd-ee-ff)" "$guided_speaker_output" "guided speaker choice is previewed by name"
+
+confirm_output="$(/usr/bin/printf 'n\n' | run_installer confirm-no AA-BB-CC-DD-EE-FF --any-power 2>&1)"
+confirm_status=$?
+assert_ne "0" "$confirm_status" "declining the confirmation stops setup"
+if [ ! -e "$TEST_ROOT/confirm-no/config/config" ]; then pass "declined setup writes no configuration"
+else fail "declined setup writes no configuration"; fi
+
 TEST_USB_SNAPSHOT="$FIXTURES/usb-hub.plist"
 export TEST_USB_SNAPSHOT
 multiple_output="$(/usr/bin/printf '2\n' | run_installer guided-multiple AA-BB-CC-DD-EE-FF --dry-run 2>&1)"
 multiple_status=$?
+numbered_source_output="$(run_installer numbered-source AA-BB-CC-DD-EE-FF --source 2 --dry-run </dev/null 2>&1)"
+numbered_source_status=$?
 unset TEST_USB_SNAPSHOT UNCORDEX_FORCE_INTERACTIVE
 assert_eq "0" "$multiple_status" "guided setup accepts a choice among multiple sources"
 assert_contains "Desk USB-C Hub" "$multiple_output" "guided setup previews the chosen source"
+assert_eq "0" "$numbered_source_status" "--source accepts the number from 'uncordex sources'"
+assert_contains "Desk USB-C Hub" "$numbered_source_output" "numbered source resolves to the listed dock"
+
+numbered_speaker_output="$(run_installer numbered-speaker 1 --any-power --dry-run 2>&1)"
+numbered_speaker_status=$?
+assert_eq "0" "$numbered_speaker_status" "setup accepts a speaker number"
+assert_contains "Test Speaker (aa-bb-cc-dd-ee-ff)" "$numbered_speaker_output" "speaker number resolves to the paired device"
 
 dry_output="$(run_installer dry AA-BB-CC-DD-EE-FF --any-power --dry-run 2>&1)"
 dry_status=$?
 assert_eq "0" "$dry_status" "explicit any-power dry-run validates"
-assert_contains "any external power" "$dry_output" "dry-run previews broad matching clearly"
+assert_contains "on external power" "$dry_output" "dry-run previews broad matching clearly"
+assert_contains "nothing was changed" "$dry_output" "dry-run says nothing changed"
 if [ ! -e "$TEST_ROOT/dry" ]; then pass "dry-run leaves installation paths untouched"
 else fail "dry-run leaves installation paths untouched"; fi
-
-no_dependency_install_output="$(run_installer no-dependency-install AA-BB-CC-DD-EE-FF --any-power --no-install-dependencies 2>&1)"
-no_dependency_install_status=$?
-assert_eq "0" "$no_dependency_install_status" "app-managed setup accepts the no-dependency-install boundary"
-assert_contains "Installed uk.magrathean.uncordex.watch-power" "$no_dependency_install_output" "no-dependency-install setup still uses the canonical installer"
 
 conflict_output="$(run_installer conflict AA-BB-CC-DD-EE-FF --any-power --disconnect-only --dry-run 2>&1)"
 conflict_status=$?
 assert_ne "0" "$conflict_status" "conflicting mode flags fail"
-assert_contains "only one reconnection mode" "$conflict_output" "mode conflict explains the correction"
-
-duplicate_any_output="$(run_installer duplicate-any AA-BB-CC-DD-EE-FF --any-power --any-power --dry-run 2>&1)"
-duplicate_any_status=$?
-assert_ne "0" "$duplicate_any_status" "repeated any-power mode fails"
-assert_contains "only one reconnection mode" "$duplicate_any_output" "repeated any-power mode explains the correction"
+assert_contains "choose only one rule" "$conflict_output" "mode conflict explains the correction"
 
 duplicate_source_output="$(run_installer duplicate-source AA-BB-CC-DD-EE-FF --source "$dock_key" --source "$dock_key" --dry-run 2>&1)"
 duplicate_source_status=$?
 assert_ne "0" "$duplicate_source_status" "repeated source mode fails"
-assert_contains "only one reconnection mode" "$duplicate_source_output" "repeated source mode explains the correction"
-
-discover_dry_output="$(run_installer discover-dry --discover --dry-run 2>&1)"
-discover_dry_status=$?
-assert_ne "0" "$discover_dry_status" "discovery rejects dry-run setup modifier"
-assert_contains "--discover cannot be combined" "$discover_dry_output" "discovery dry-run conflict is explicit"
-
-discover_dependency_output="$(run_installer discover-dependency --discover --no-install-dependencies 2>&1)"
-discover_dependency_status=$?
-assert_ne "0" "$discover_dependency_status" "discovery rejects dependency setup modifier"
-assert_contains "--discover cannot be combined" "$discover_dependency_output" "discovery dependency conflict is explicit"
+assert_contains "choose only one rule" "$duplicate_source_output" "repeated source mode explains the correction"
 
 missing_output="$(run_installer missing AA-BB-CC-DD-EE-FF --dry-run 2>&1)"
 missing_status=$?
-assert_ne "0" "$missing_status" "first noninteractive install requires a deliberate mode"
-assert_contains "requires --source" "$missing_output" "missing-mode error lists explicit choices"
+assert_ne "0" "$missing_status" "first noninteractive setup requires a deliberate rule"
+assert_contains "--source N, --any-power or --disconnect-only" "$missing_output" "missing-rule error lists explicit choices"
 
 invalid_output="$(run_installer invalid AA-BB-CC-DD-EE-FF --source deadbeef --dry-run 2>&1)"
 invalid_status=$?
 assert_ne "0" "$invalid_status" "unknown source keys are rejected"
-assert_contains "not a unique usable source" "$invalid_output" "invalid source error fails closed"
+assert_contains "is not connected now" "$invalid_output" "invalid source error fails closed"
+
+bad_address_output="$(run_installer bad-address not-an-address --any-power --dry-run 2>&1)"
+assert_contains "AA-BB-CC-DD-EE-FF" "$bad_address_output" "an invalid speaker shows the expected format"
 
 FAILING_PLUTIL="$TEST_ROOT/failing-plutil"
 # The quoted expressions belong to the generated fake, not this process.
@@ -617,7 +645,7 @@ staging_output="$(run_installer staging-failure AA-BB-CC-DD-EE-FF --any-power 2>
 staging_status=$?
 unset UNCORDEX_PLUTIL
 assert_ne "0" "$staging_status" "staging validation failure is reported"
-case "$staging_output" in *"Installed uk.magrathean.uncordex.watch-power"*) fail "staging failure never reports installation success" ;; *) pass "staging failure never reports installation success" ;; esac
+case "$staging_output" in *"Uncordex is running"*) fail "staging failure never reports success" ;; *) pass "staging failure never reports success" ;; esac
 if [ ! -e "$TEST_ROOT/staging-failure" ]; then pass "staging failure leaves existing service paths untouched"
 else fail "staging failure leaves existing service paths untouched"; fi
 
@@ -646,7 +674,7 @@ bootout_failure_base="$TEST_ROOT/bootout-failure"
 /usr/bin/printf '%s\n' old-plist >"$bootout_failure_base/LaunchAgents/service.plist"
 bootout_failure_output="$(UNCORDEX_CANONICAL_LOADED=1 UNCORDEX_FAIL_BOOTOUT=1 run_installer bootout-failure AA-BB-CC-DD-EE-FF --any-power 2>&1)"
 bootout_failure_status=$?
-assert_ne "0" "$bootout_failure_status" "loaded-service stop failure blocks installation"
+assert_ne "0" "$bootout_failure_status" "loaded-service stop failure blocks setup"
 assert_contains "could not be stopped" "$bootout_failure_output" "loaded-service stop failure is explicit"
 assert_eq "old-watcher" "$(/bin/cat "$bootout_failure_base/app/watch-power")" "loaded-service stop failure preserves watcher"
 assert_eq "old-library" "$(/bin/cat "$bootout_failure_base/app/lib/source.sh")" "loaded-service stop failure preserves source library"
@@ -666,31 +694,41 @@ preserve_base="$TEST_ROOT/preserve"
   'SOURCE_KIND=thunderbolt' \
   "SOURCE_KEY=$dock_key" \
   'SOURCE_LABEL=Saved\ Dock' >"$preserve_base/config/config"
-preserve_output="$(run_installer preserve AA-BB-CC-DD-EE-FF --dry-run 2>&1)"
+preserve_output="$(run_installer preserve --dry-run 2>&1)"
 preserve_status=$?
-assert_eq "0" "$preserve_status" "update can preserve an existing exact-source rule"
-assert_contains "Saved Dock" "$preserve_output" "preserved rule is shown in the preview"
+assert_eq "0" "$preserve_status" "setup can keep an existing speaker and exact-source rule"
+assert_contains "Saved Dock" "$preserve_output" "kept rule is shown in the preview"
 
 success_output="$(run_installer success AA-BB-CC-DD-EE-FF --any-power 2>&1)"
 success_status=$?
-assert_eq "0" "$success_status" "isolated installation activates successfully"
-assert_contains "Installed uk.magrathean.uncordex.watch-power" "$success_output" "successful installation reports the canonical service"
-if [ -x "$TEST_ROOT/success/app/watch-power" ] && [ -r "$TEST_ROOT/success/app/lib/source.sh" ]; then pass "installation includes watcher and source library"
-else fail "installation includes watcher and source library"; fi
-assert_contains "RECONNECT_MODE=any_power" "$(/bin/cat "$TEST_ROOT/success/config/config")" "installed configuration records the explicit mode"
+assert_eq "0" "$success_status" "isolated setup activates successfully"
+assert_contains "Uncordex is running" "$success_output" "successful setup says it is running"
+if [ -x "$TEST_ROOT/success/app/watch-power" ] && [ -r "$TEST_ROOT/success/app/lib/source.sh" ]; then pass "setup installs watcher and source library"
+else fail "setup installs watcher and source library"; fi
+assert_contains "RECONNECT_MODE=any_power" "$(/bin/cat "$TEST_ROOT/success/config/config")" "saved configuration records the explicit rule"
+assert_contains "enable gui/" "$(/bin/cat "$TEST_ROOT/success/launch.trace")" "setup clears an earlier stop before starting"
 if /usr/bin/plutil -lint "$TEST_ROOT/success/LaunchAgents/service.plist" >/dev/null; then pass "installed LaunchAgent is a valid plist"
 else fail "installed LaunchAgent is a valid plist"; fi
 status_state="$TEST_ROOT/status-only/runtime-state"
 status_output="$(UNCORDEX_WATCHER_LIBRARY_ONLY=0 UNCORDEX_CONFIG_FILE="$TEST_ROOT/success/config/config" UNCORDEX_STATE_FILE="$status_state" "$TEST_ROOT/success/app/watch-power" --status 2>&1)"
 status_status=$?
 assert_eq "0" "$status_status" "installed watcher status is readable"
-assert_contains "mode: any_power" "$status_output" "status reports the configured rule"
+assert_contains "mode: any_power" "$status_output" "watcher status reports the configured rule"
 if [ ! -e "$status_state" ]; then pass "status does not create runtime state"
 else fail "status does not create runtime state"; fi
-status_plist="$TEST_ROOT/status-only/watcher-status.plist"
-/bin/mkdir -p "$TEST_ROOT/status-only"
-UNCORDEX_WATCHER_LIBRARY_ONLY=0 UNCORDEX_CONFIG_FILE="$TEST_ROOT/success/config/config" UNCORDEX_STATE_FILE="$status_state" "$TEST_ROOT/success/app/watch-power" --status-plist >"$status_plist"
-assert_eq "false" "$(/usr/bin/plutil -extract state_valid raw -n "$status_plist")" "machine watcher status marks missing cache as invalid"
+cli_status_output="$(UNCORDEX_CANONICAL_LOADED=1 run_cli success status 2>&1)"
+assert_contains "Restore: no watcher-owned restore is pending" "$cli_status_output" "CLI status includes the watcher's restore state"
+
+stop_output="$(UNCORDEX_CANONICAL_LOADED=1 run_cli success stop 2>&1)"
+assert_contains "uncordex start" "$stop_output" "stop says how to turn it back on"
+stop_trace="$(/bin/cat "$TEST_ROOT/success/launch.trace")"
+assert_contains "disable gui/" "$stop_trace" "stop keeps the service off across logins"
+start_output="$(run_cli success start 2>&1)"
+start_status=$?
+assert_eq "0" "$start_status" "start succeeds after stop"
+assert_eq "2" "$(/usr/bin/grep -c '^bootstrap ' "$TEST_ROOT/success/launch.trace")" "start loads the LaunchAgent again"
+not_setup_start_output="$(run_cli start-missing start 2>&1)"
+assert_contains "uncordex setup" "$not_setup_start_output" "start without setup points to setup"
 
 # Default application directory: XDG_DATA_HOME first, then $HOME/.local/share (an empty XDG_DATA_HOME counts as not set).
 # HOME is a test directory here, and XDG_DATA_HOME is only ever assigned, never unset.
@@ -708,6 +746,7 @@ run_installer_default_app_dir() {
     UNCORDEX_THUNDERBOLT_SNAPSHOT="$FIXTURES/thunderbolt-dock.plist" \
     UNCORDEX_USB_SNAPSHOT="$FIXTURES/empty.plist" \
     UNCORDEX_ADAPTER_SNAPSHOT="$FIXTURES/empty.plist" \
+    UNCORDEX_BIN_DIR="$INSTALL_BASE/bin" \
     UNCORDEX_CONFIG_DIR="$INSTALL_BASE/config" \
     UNCORDEX_STATE_DIR="$INSTALL_BASE/state" \
     UNCORDEX_PLIST="$INSTALL_BASE/LaunchAgents/service.plist" \
@@ -715,7 +754,7 @@ run_installer_default_app_dir() {
     UNCORDEX_BLUEUTIL="$FAKE_BLUEUTIL" \
     UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" \
     UNCORDEX_LAUNCH_TRACE="$INSTALL_BASE/launch.trace" \
-    "$ROOT_DIR/install.sh" "$@"
+    "$ROOT_DIR/uncordex" setup "$@"
   )
 }
 
@@ -723,7 +762,7 @@ xdg_home="$TEST_ROOT/xdg-data-home-home"
 xdg_data="$TEST_ROOT/xdg-data-home-data"
 run_installer_default_app_dir xdg-data-home "$xdg_home" "$xdg_data" AA-BB-CC-DD-EE-FF --any-power >/dev/null 2>&1
 xdg_status=$?
-assert_eq "0" "$xdg_status" "installation with XDG_DATA_HOME succeeds"
+assert_eq "0" "$xdg_status" "setup with XDG_DATA_HOME succeeds"
 if [ -x "$xdg_data/uncordex/watch-power" ] && [ -r "$xdg_data/uncordex/lib/source.sh" ]; then pass "XDG_DATA_HOME selects the default application directory"
 else fail "XDG_DATA_HOME selects the default application directory"; fi
 assert_eq "$xdg_data/uncordex/watch-power" "$(/usr/bin/plutil -extract ProgramArguments.0 raw -n "$TEST_ROOT/xdg-data-home/LaunchAgents/service.plist")" "LaunchAgent runs the watcher from XDG_DATA_HOME"
@@ -733,7 +772,7 @@ else fail "XDG_DATA_HOME leaves the home data directory untouched"; fi
 fallback_home="$TEST_ROOT/xdg-fallback-home"
 run_installer_default_app_dir xdg-fallback "$fallback_home" "" AA-BB-CC-DD-EE-FF --any-power >/dev/null 2>&1
 fallback_status=$?
-assert_eq "0" "$fallback_status" "installation with an empty XDG_DATA_HOME succeeds"
+assert_eq "0" "$fallback_status" "setup with an empty XDG_DATA_HOME succeeds"
 if [ -x "$fallback_home/.local/share/uncordex/watch-power" ]; then pass "an empty XDG_DATA_HOME falls back to the home data directory"
 else fail "an empty XDG_DATA_HOME falls back to the home data directory"; fi
 
@@ -742,7 +781,7 @@ export UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT
 legacy_unplugged_output="$(run_installer legacy-unplugged AA-BB-CC-DD-EE-FF --any-power 2>&1)"
 legacy_unplugged_status=$?
 unset UNCORDEX_UNPLUGGED_LEGACY_SERVICE_PRESENT
-assert_ne "0" "$legacy_unplugged_status" "prior public watcher blocks a competing installation"
+assert_ne "0" "$legacy_unplugged_status" "prior public watcher blocks a competing setup"
 assert_contains "com.unplugged-speaker.watch-power" "$legacy_unplugged_output" "prior public watcher identifies itself"
 if [ ! -e "$TEST_ROOT/legacy-unplugged" ]; then pass "prior public watcher check occurs before persistent writes"
 else fail "prior public watcher check occurs before persistent writes"; fi
@@ -752,7 +791,7 @@ export UNCORDEX_BT_AUTO_LEGACY_SERVICE_PRESENT
 legacy_bt_auto_output="$(run_installer legacy-bt-auto AA-BB-CC-DD-EE-FF --any-power 2>&1)"
 legacy_bt_auto_status=$?
 unset UNCORDEX_BT_AUTO_LEGACY_SERVICE_PRESENT
-assert_ne "0" "$legacy_bt_auto_status" "older watcher blocks a competing installation"
+assert_ne "0" "$legacy_bt_auto_status" "older watcher blocks a competing setup"
 assert_contains "com.bolyki.bt-auto-speaker-power" "$legacy_bt_auto_output" "older watcher identifies itself"
 if [ ! -e "$TEST_ROOT/legacy-bt-auto" ]; then pass "older watcher check occurs before persistent writes"
 else fail "older watcher check occurs before persistent writes"; fi
@@ -770,41 +809,64 @@ rollback_output="$(run_installer rollback AA-BB-CC-DD-EE-FF --any-power 2>&1)"
 rollback_status=$?
 unset UNCORDEX_CANONICAL_LOADED UNCORDEX_FAIL_BOOTSTRAP_ONCE
 assert_ne "0" "$rollback_status" "activation failure is reported"
-assert_contains "previous installation was restored" "$rollback_output" "rollback is reported clearly"
+assert_contains "previous setup was restored" "$rollback_output" "rollback is reported clearly"
 assert_eq "old-watcher" "$(/bin/cat "$rollback_base/app/watch-power")" "activation failure restores watcher"
 assert_eq "old-library" "$(/bin/cat "$rollback_base/app/lib/source.sh")" "activation failure restores source library"
 assert_eq "# old-config" "$(/bin/cat "$rollback_base/config/config")" "activation failure restores configuration"
 assert_eq "old-plist" "$(/bin/cat "$rollback_base/LaunchAgents/service.plist")" "activation failure restores LaunchAgent"
 assert_eq "2" "$(/usr/bin/grep -c '^bootstrap ' "$rollback_base/launch.trace")" "rollback reactivates a previously loaded service"
 
+# install.sh from this checkout into isolated directories, then the installed command.
+installer_base="$TEST_ROOT/installer"
+installer_output="$(UNCORDEX_APP_DIR="$installer_base/app" UNCORDEX_BIN_DIR="$installer_base/bin" UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" UNCORDEX_LAUNCH_TRACE="$installer_base/launch.trace" \
+  "$ROOT_DIR/install.sh" --no-install-dependencies 2>&1)"
+installer_status=$?
+assert_eq "0" "$installer_status" "install.sh installs from a checkout"
+assert_contains "uncordex setup" "$installer_output" "install.sh says what to run next"
+assert_eq "uncordex $(/bin/cat "$ROOT_DIR/VERSION")" "$("$installer_base/bin/uncordex" version 2>&1)" "the linked command finds its installed files"
+installed_setup_output="$(UNCORDEX_CLI="$installer_base/bin/uncordex" run_cli installed-setup setup AA-BB-CC-DD-EE-FF --any-power 2>&1)"
+assert_contains "Uncordex is running" "$installed_setup_output" "the installed command completes setup"
+installed_self_output="$(UNCORDEX_APP_DIR="$installer_base/app" UNCORDEX_BIN_DIR="$installer_base/bin" UNCORDEX_CONFIG_DIR="$installer_base/config" UNCORDEX_STATE_DIR="$installer_base/state" \
+  UNCORDEX_PLIST="$installer_base/LaunchAgents/service.plist" UNCORDEX_LOG_DIR="$installer_base/logs" UNCORDEX_BLUEUTIL="$FAKE_BLUEUTIL" \
+  UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" UNCORDEX_LAUNCH_TRACE="$installer_base/launch.trace" "$installer_base/bin/uncordex" setup AA-BB-CC-DD-EE-FF --disconnect-only 2>&1)"
+installed_self_status=$?
+assert_eq "0" "$installed_self_status" "setup from the installed copy leaves its own files in place"
+if /bin/bash -n "$installer_base/app/watch-power" && [ -s "$installer_base/app/lib/source.sh" ]; then pass "installed watcher survives setup from the installed copy"
+else fail "installed watcher survives setup from the installed copy"; fi
+
+uninstall_output="$(UNCORDEX_APP_DIR="$installer_base/app" UNCORDEX_BIN_DIR="$installer_base/bin" UNCORDEX_CONFIG_DIR="$installer_base/config" UNCORDEX_STATE_DIR="$installer_base/state" \
+  UNCORDEX_PLIST="$installer_base/LaunchAgents/service.plist" UNCORDEX_LOG_DIR="$installer_base/logs" \
+  UNCORDEX_CANONICAL_LOADED=1 UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" UNCORDEX_LAUNCH_TRACE="$installer_base/launch.trace" "$installer_base/bin/uncordex" uninstall 2>&1)"
+uninstall_status=$?
+assert_eq "0" "$uninstall_status" "uninstall succeeds"
+assert_contains "settings were kept" "$uninstall_output" "uninstall says settings were kept"
+if [ ! -e "$installer_base/LaunchAgents/service.plist" ] && [ ! -e "$installer_base/app/watch-power" ] && [ ! -L "$installer_base/bin/uncordex" ]; then pass "uninstall removes the service, files and command"
+else fail "uninstall removes the service, files and command"; fi
+if [ -r "$installer_base/config/config" ]; then pass "uninstall keeps settings without --purge"
+else fail "uninstall keeps settings without --purge"; fi
+assert_contains "bootout gui/" "$(/bin/cat "$installer_base/launch.trace")" "uninstall stops the loaded service"
+
+purge_output="$(run_cli success uninstall --purge 2>&1)"
+purge_status=$?
+assert_eq "0" "$purge_status" "uninstall --purge succeeds"
+if [ ! -e "$TEST_ROOT/success/config/config" ]; then pass "uninstall --purge deletes settings"
+else fail "uninstall --purge deletes settings"; fi
+
+uninstall_failure_base="$TEST_ROOT/uninstall-failure"
+/bin/mkdir -p "$uninstall_failure_base/LaunchAgents"
+/usr/bin/printf '%s\n' 'test plist' >"$uninstall_failure_base/LaunchAgents/service.plist"
+uninstall_failure_output="$(UNCORDEX_CANONICAL_LOADED=1 UNCORDEX_FAIL_BOOTOUT=1 run_cli uninstall-failure uninstall 2>&1)"
+uninstall_failure_status=$?
+assert_ne "0" "$uninstall_failure_status" "uninstall reports a failed loaded-service stop"
+assert_contains "still running" "$uninstall_failure_output" "failed service stop leaves a clear error"
+if [ -e "$uninstall_failure_base/LaunchAgents/service.plist" ]; then pass "failed service stop preserves its LaunchAgent plist"
+else fail "failed service stop preserves its LaunchAgent plist"; fi
+
 FAILING_QUERY="$TEST_ROOT/failing-query"
 /usr/bin/printf '%s\n' '#!/bin/bash' 'printf "1\\n"' 'exit 2' >"$FAILING_QUERY"
 /bin/chmod 755 "$FAILING_QUERY"
 query_result="$(UNCORDEX_WATCHER_LIBRARY_ONLY=1 /bin/bash -c '. "$1"; BLUEUTIL="$2"; DEVICE_MAC=AA-BB-CC-DD-EE-FF; speaker_state' _ "$ROOT_DIR/watch-power" "$FAILING_QUERY")"
 assert_eq "unknown" "$query_result" "nonzero connection query containing 1 is treated as unknown"
-
-uninstall_base="$TEST_ROOT/uninstall"
-/bin/mkdir -p "$uninstall_base"
-uninstall_plist="$uninstall_base/service.plist"
-/usr/bin/printf '%s\n' 'test plist' >"$uninstall_plist"
-uninstall_trace="$uninstall_base/launch.trace"
-uninstall_output="$(UNCORDEX_CANONICAL_LOADED=0 UNCORDEX_PLIST="$uninstall_plist" UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" UNCORDEX_LAUNCH_TRACE="$uninstall_trace" "$ROOT_DIR/uninstall.sh" 2>&1)"
-uninstall_status=$?
-assert_eq "0" "$uninstall_status" "isolated uninstall succeeds when the service is unloaded"
-case "$uninstall_output" in *"Stopped Uncordex"*) pass "isolated uninstall reports completion" ;; *) fail "isolated uninstall reports completion" ;; esac
-if [ ! -e "$uninstall_plist" ]; then pass "isolated uninstall removes only its injected plist"
-else fail "isolated uninstall removes only its injected plist"; fi
-assert_contains "print gui/" "$(/bin/cat "$uninstall_trace")" "isolated uninstall checks its canonical service"
-
-/usr/bin/printf '%s\n' 'test plist' >"$uninstall_plist"
-uninstall_failure_trace="$uninstall_base/failure.trace"
-uninstall_failure_output="$(UNCORDEX_CANONICAL_LOADED=1 UNCORDEX_FAIL_BOOTOUT=1 UNCORDEX_PLIST="$uninstall_plist" UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" UNCORDEX_LAUNCH_TRACE="$uninstall_failure_trace" "$ROOT_DIR/uninstall.sh" 2>&1)"
-uninstall_failure_status=$?
-assert_ne "0" "$uninstall_failure_status" "uninstall reports a failed loaded-service stop"
-assert_contains "still running" "$uninstall_failure_output" "failed service stop leaves a clear error"
-if [ -e "$uninstall_plist" ]; then pass "failed service stop preserves its LaunchAgent plist"
-else fail "failed service stop preserves its LaunchAgent plist"; fi
-assert_contains "bootout gui/" "$(/bin/cat "$uninstall_failure_trace")" "loaded uninstall attempts the canonical bootout"
 
 printf '%s tests passed; %s tests failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

@@ -1,70 +1,33 @@
 # Development
 
-Run commands from the repository root on macOS. App checks require the Swift compiler and macOS SDK available through `xcrun`. Package work also uses Apple's signing and Installer tools. Read the scripts before selecting an output directory: app and package scripts replace their designated build or verification directories.
+Run commands from the repository root on macOS.
 
 ## Boundaries
 
-Ordinary verification must not change the logged-in user's service or Bluetooth devices. Do not run `install.sh` or `uninstall.sh` directly as a test. The service suite supplies isolated paths and substitutes hardware, Bluetooth, clock, and LaunchAgent commands. The app tests use fake service adapters and local subprocess fixtures.
+Ordinary verification must not change the logged-in user's service or Bluetooth devices. Do not run `install.sh` or `uncordex setup`, `start`, `stop` or `uninstall` directly as a test. The service suite supplies isolated paths and substitutes hardware, Bluetooth, clock, and LaunchAgent commands.
 
 Keep Bash 3.2 compatibility, both Homebrew paths, and the project's single-speaker scope. Preserve unrelated work.
 
-## Choose the checks
-
-| Change | Relevant checks |
-| --- | --- |
-| Shell service, source matching, or installer | Shell syntax and `bash tests/run.sh` |
-| App model, process handling, or window behavior | `bash app/test.sh`, which also runs the window tests |
-| App bundle or resources | `bash app/build.sh` and inspect the generated bundle |
-| Package assembly or validation | Build an artifact, then run `packaging/test.sh` with that artifact |
-| UI layout | Inspect fixture screenshots at normal and minimum size, in light and dark appearance |
-| Documentation | Check commands against source, links, and claims against their evidence |
+## Checks
 
 Check all shell entry points without executing them:
 
 ```bash
-bash -n \
-  install.sh uninstall.sh watch-power lib/source.sh tests/run.sh \
-  app/build.sh app/test.sh app/window-test.sh \
-  packaging/build.sh packaging/validate.sh packaging/test.sh
+bash -n uncordex install.sh watch-power lib/source.sh tests/run.sh
 ```
 
-For shell changes, run ShellCheck over the same files when it is already installed. Do not install it just for this check.
-
-## App and package output
+Run the test suite:
 
 ```bash
 bash tests/run.sh
-bash app/test.sh
-bash app/build.sh
 ```
 
-The scripts write only below the development build root: `$CLEAN_DEVELOPMENT_BUILD_ROOT` when set, otherwise `$CLEAN_DEVELOPMENT_ROOT/builds`, and `$HOME/dev/build` only when neither variable is set. The examples below use `build_root` for that directory:
+When ShellCheck is already installed, run it over the same files. Do not install it just for this check. For documentation changes, check commands against `uncordex` usage text, links, and claims against their evidence.
 
-```bash
-build_root="${CLEAN_DEVELOPMENT_BUILD_ROOT:-${CLEAN_DEVELOPMENT_ROOT:+$CLEAN_DEVELOPMENT_ROOT/builds}}"
-build_root="${build_root:-$HOME/dev/build}"
-```
-
-App output defaults to `$build_root/uncordex/gui`. `UNCORDEX_BUILD_ROOT` can select another directory under `$build_root`; paths with dot components or resolved escapes are rejected. A build creates a universal arm64/x86_64 app targeting macOS 13.0 and signs it ad hoc. See [App development](app.md) for the bundle and fixture interface.
-
-```bash
-bash packaging/build.sh
-```
-
-Without signing identities this produces an unsigned development package. `UNCORDEX_PKG_BUILD_ROOT` defaults to `$build_root/uncordex/pkg`. Use the actual version from `VERSION` when selecting an artifact:
-
-```bash
-version="$(cat VERSION)"
-UNCORDEX_PKG_UNDER_TEST="$build_root/uncordex/pkg/Uncordex-$version.pkg" \
-  bash packaging/test.sh
-```
-
-Set `UNCORDEX_PKG_REQUIRE_SIGNED=1` for a signed release artifact and `UNCORDEX_PKG_REQUIRE_NOTARIZED=1` when notarization is required. Without `UNCORDEX_PKG_UNDER_TEST`, the package suite checks rejection cases only. It does not validate a built package or install anything. See [Packaging](pkg.md) and [Releasing](releasing.md).
-
-Run these build, test, and package commands through [Clean Development](https://github.com/magrathean-uk/clean-development), as the "Clean development" section of [AGENTS.md](../AGENTS.md) requires, for example `clean-development run --session session-only -- bash app/test.sh`. It routes development caches and supported build output; do not unset or bypass the routed environment variables.
+Run build and test commands through [Clean Development](https://github.com/magrathean-uk/clean-development), as the "Clean development" section of [AGENTS.md](../AGENTS.md) requires. It routes development caches and supported build output; do not unset or bypass the routed environment variables.
 
 ## Acceptance
 
-A passing fixture suite establishes behavior under its substituted boundaries. A universal binary and deployment target establish build configuration. Neither establishes behavior on a particular Mac or speaker.
+A passing fixture suite establishes behaviour under its substituted boundaries. It does not establish behaviour on a particular Mac or speaker.
 
-For hardware work, record the exact source and artifact, macOS version, architecture, hardware, observed state transitions, manual actions, and remaining gaps. Treat [the dated acceptance record](testing/2026-09-09-live-acceptance.md) as historical evidence for its stated implementation. Do not reuse its counts or package hash as validation of a later change.
+For hardware work, record the exact source, macOS version, architecture, hardware, observed state transitions, manual actions, and remaining gaps. Treat [the dated acceptance record](testing/2026-09-09-live-acceptance.md) as historical evidence for its stated implementation. Do not reuse its counts as validation of a later change.

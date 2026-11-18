@@ -4,7 +4,7 @@ Describe the problem and resulting behavior.
 
 ## Verification
 
-List the relevant checks and results. Separate simulated tests, bundle/package inspection, fixture visuals, and physical hardware acceptance. State what remains unverified.
+List the relevant checks and results. Separate simulated tests, and physical hardware acceptance. State what remains unverified.
 
 ## Review notes
 

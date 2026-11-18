@@ -1,16 +1,19 @@
 # Changelog
 
-Entries describe repository development. Consult the matching tag and release assets before treating an entry as a distributed app or package.
+Entries describe repository development. Consult the matching tag before treating an entry as a release.
 
-## Unreleased
+## 2.0.0 (2026-11-18)
 
-- Install the watcher under `XDG_DATA_HOME` when it is set (default unchanged when it is not), and make the app, package, and test scripts write below the Clean Development build root (`CLEAN_DEVELOPMENT_BUILD_ROOT`, then `CLEAN_DEVELOPMENT_ROOT/builds`) instead of a fixed home path. An existing installation at the previous default stays in place until you remove it.
+- Removed the GUI app and the macOS package.
+- Added a single `uncordex` command with `setup`, `status`, `start`, `stop`, `restart`, `logs`, `devices`, `sources` and `uninstall`.
+- Added numbered choices for the speaker and the dock or charger.
+- Added a one-line installer.
+- `install.sh` no longer performs setup; use `uncordex setup`.
+- `uninstall.sh` is replaced by `uncordex uninstall`.
+- Existing configuration and the LaunchAgent stay compatible.
+- Install the watcher under `XDG_DATA_HOME` when it is set (default unchanged when it is not). An existing installation at the previous default stays in place until you remove it.
 - Require fresh source confirmation after unreadable observations and retain the reconnect budget when readings become unknown during an attempt.
-- Preserve running-service files when the installer or uninstaller cannot stop the LaunchAgent; reject repeated or conflicting setup options.
-- Preserve speaker selections across reordered discovery and retain both prior lists when discovery fails.
-- Wait for active app operations before quitting, and expand preview/error feedback so it remains readable at the minimum window size.
-- Guard package-validation cleanup paths and support validation of unsigned development packages without weakening required-signature checks.
-- Add simulated service and AppKit regression coverage, validate app version input, and correct the installation guide's discovery button label.
+- Preserve running-service files when setup or uninstall cannot stop the LaunchAgent; reject repeated or conflicting setup options.
 
 ## 1.0.0 (2026-09-09)
 
@@ -20,6 +23,6 @@ Entries describe repository development. Consult the matching tag and release as
 - Added validated same-boot runtime persistence and read-only status output.
 - Added guided/noninteractive setup, dry-run, rule-preserving updates, legacy-watcher conflict detection, staged activation, backups, and rollback.
 - Added fixture and simulated acceptance coverage for hardware, watcher, and installer behavior.
-- Added a native AppKit controller with Overview, Speaker & Rule, and Diagnostics views.
+- Added a native AppKit controller (removed in 2.0.0) with Overview, Speaker & Rule, and Diagnostics views.
 - Added a script-free macOS Installer package that installs the universal app in `/Applications`.
 - Updated the public documentation around app-first setup, package boundaries, live acceptance, and the rounded paper-cut icon.

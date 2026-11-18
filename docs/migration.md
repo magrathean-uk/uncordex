@@ -1,19 +1,20 @@
 # Migration from older watchers
 
-Uncordex refuses to install while either known older speaker controller is loaded:
+`uncordex setup` refuses to continue while either known older speaker controller is loaded:
 
 - `com.unplugged-speaker.watch-power`, used by the earlier Unplugged Speaker release;
 - `com.bolyki.bt-auto-speaker-power`, used by an older local watcher.
 
-This prevents two services from controlling the same speaker. The installer does not stop, overwrite, delete, or import an older installation automatically.
+This prevents two services from controlling the same speaker. Setup does not stop, overwrite, delete, or import an older installation automatically.
 
 ## 1. Validate Uncordex
 
-Connect the intended dock or charger and inspect source discovery and a dry run:
+Connect the intended dock or charger, then look at what Uncordex can see and preview a setup:
 
 ```bash
-./install.sh --discover
-./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY --dry-run
+uncordex devices
+uncordex sources
+uncordex setup 1 --source 1 --dry-run
 ```
 
 If macOS cannot provide a unique source identity, choose `--any-power` or `--disconnect-only` deliberately.
@@ -64,13 +65,13 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.bolyki.bt-auto-
 
 Do not delete the backup or old files yet. The old property list may load the service again at a later login unless you deliberately disable or remove that installation.
 
-## 4. Install and accept Uncordex
+## 4. Set up and accept Uncordex
 
-In the app, open **Speaker & Rule**, choose the speaker and saved source, review **Preview**, then select **Save & Start**. From a checkout, configure and inspect the canonical job:
+Run guided setup, then inspect the service:
 
 ```bash
-./install.sh AA-BB-CC-DD-EE-FF --source SOURCE_KEY
-launchctl print "gui/$(id -u)/uk.magrathean.uncordex.watch-power"
+uncordex setup
+uncordex status
 ```
 
 Confirm the old label remains unloaded. Test a physical disconnect and restoration with the actual dock or charger and speaker. Fixture-based tests cannot establish this acceptance.

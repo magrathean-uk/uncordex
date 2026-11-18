@@ -1,67 +1,58 @@
 # Troubleshooting
 
-## The app says `blueutil` is unavailable
+Start with `uncordex status`. It shows the service, speaker, power and restore state.
 
-Install the external helper, then refresh status:
+## `blueutil` is missing
+
+Install the external helper, then run `uncordex status` again:
 
 ```bash
 brew install blueutil
 ```
 
-Uncordex checks the standard Apple Silicon path `/opt/homebrew/bin/blueutil` and Intel path `/usr/local/bin/blueutil`. The app does not install Homebrew packages automatically.
+Uncordex checks the Apple Silicon path `/opt/homebrew/bin/blueutil` and the Intel path `/usr/local/bin/blueutil`. `install.sh` installs it for you when Homebrew is present.
 
-## No exact source appears
+## macOS blocked Bluetooth access
 
-Some chargers do not expose a serial, and some USB devices expose duplicate or placeholder identities. Uncordex does not infer identity from a model name, wattage, port, voltage, or battery serial.
+The first time, macOS may ask to allow Bluetooth for your terminal app. If it was refused, allow it in System Settings > Privacy & Security > Bluetooth, then try again.
 
-Choose **Any external power** only when every charger may restore the speaker. Otherwise choose **Disconnect only**. To inspect candidates from a source checkout:
+## No dock or charger appears
+
+Some chargers do not expose a serial, and some USB devices expose duplicate or placeholder identities. Uncordex does not infer identity from a model name, wattage, port, voltage, or battery serial. With the dock or charger attached, run:
 
 ```bash
-./install.sh --discover
+uncordex sources
 ```
 
-## The app says Not installed or Stopped
+Use `--any-power` only when every charger may restore the speaker. Otherwise use `--disconnect-only`.
 
-**Not installed** means the canonical LaunchAgent property list is missing. Complete **Speaker & Rule**, preview the setup, and select **Save & Start**.
+## Status says not installed or stopped
 
-**Stopped** means configuration and a property list exist but the service is not loaded. Select **Start**. If a loaded service has exited, use **Restart** or stop it before correcting setup.
+Not installed means setup has not completed. Run `uncordex setup`.
+
+Stopped means settings exist but the service is off. Run `uncordex start`. `uncordex stop` keeps the service off across logins until you start it again. If the service is loaded but not running, run `uncordex restart` and check `uncordex logs`.
 
 ## The speaker does not restore
 
-Check **Overview** and **Diagnostics**, or inspect status and logs:
-
 ```bash
-"${XDG_DATA_HOME:-$HOME/.local/share}/uncordex/watch-power" --status
-tail -n 100 ~/Library/Logs/uncordex.log
-tail -n 100 ~/Library/Logs/uncordex-error.log
+uncordex status
+uncordex logs
 ```
 
-Confirm the saved source is attached and AC is present, Bluetooth is on, and the speaker is powered, paired, in range, and manually connectable with `blueutil`. Restoration permission exists only if the watcher initiated and verified the earlier disconnect. A manual reconnect consumes pending permission. Automatic retries may be paused after their attempt budget expires.
+Confirm the saved dock is attached and the Mac is on power, Bluetooth is on, and the speaker is powered, paired and in range. Restoration permission exists only if the watcher disconnected the speaker itself and verified it. A manual reconnect consumes pending permission. Automatic retries pause after 6 attempts in 5 minutes.
 
 ## A different charger appeared to restore the speaker
 
-In saved-source mode, a different charger cannot satisfy the saved source key. If the Mac remained on AC while the saved dock was connected, the dock's presence can qualify restoration. In any-external-power mode, any observed battery-to-AC return is eligible. Choose a saved-source or disconnect-only rule if that is too broad.
+With a dock or charger rule (`--source`), a different charger cannot satisfy the saved identity. If the Mac stayed on power while the saved dock was connected, the dock's presence can qualify restoration. With `--any-power`, any return to power is eligible. Run `uncordex setup` again with `--source N` or `--disconnect-only` if that is too broad.
 
 ## There is no log activity
 
-Confirm that the canonical service is loaded:
-
-```bash
-launchctl print "gui/$(id -u)/uk.magrathean.uncordex.watch-power"
-```
-
-If a legacy controller is loaded, follow [migration](migration.md). Do not run both services against the same speaker.
+Run `uncordex status` to confirm the service is running, then `uncordex logs -f`. If an older controller is loaded, follow [migration](migration.md). Do not run both services against the same speaker.
 
 ## A brief unplug and replug was missed
 
-Uncordex polls every five seconds and cannot guarantee event-level precision. A complete departure and return between samples may go unseen. Keep the source disconnected long enough for the watcher to confirm the change.
+Uncordex samples every 5 seconds and cannot guarantee event-level precision. A complete departure and return between samples may go unseen. Keep the source disconnected long enough for the watcher to confirm the change.
 
-## Updating the app did not update the running service
+## Updating
 
-The macOS package replaces only `/Applications/Uncordex.app`; it leaves current per-user service files in place. Open the updated app and select **Save & Start** to validate and replace the bundled per-user watcher files.
-
-A source reinstall preserves a valid rule. Use `--relearn` or a deliberate mode flag to change it. Use `--dry-run` first to preview the result.
-
-## macOS blocks a package
-
-Check the instructions and signing or notarization status published for the exact package artifact you received. Those properties can differ between builds. If the artifact's provenance or status is unclear, do not bypass Gatekeeper; obtain a verified artifact or build from reviewed source following [package guidance](pkg.md).
+Run the install command again. It replaces the installed files and restarts a running service, and your saved rule is kept. Run `uncordex setup` to change the speaker or rule; add `--dry-run` first to preview.
