@@ -14,7 +14,7 @@ Uncordex checks the Apple Silicon path `/opt/homebrew/bin/blueutil` and the Inte
 
 ## macOS blocked Bluetooth access
 
-The first time, macOS may ask to allow Bluetooth for your terminal app. If it was refused, allow it in System Settings > Privacy & Security > Bluetooth, then try again.
+Bluetooth access belongs to Uncordex itself, through the small `Uncordex.app` helper in Uncordex's data folder. The first `uncordex setup` makes macOS ask once; click Allow. If access was refused, setup opens System Settings > Privacy & Security > Bluetooth and continues once Uncordex is turned on. If setup says the helper is missing, install Apple's command line tools (`xcode-select --install`) and run the installer again.
 
 ## No dock or charger appears
 

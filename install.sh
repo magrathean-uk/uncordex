@@ -41,7 +41,7 @@ else
     fail "download failed." "Check your internet connection and try again."
   SOURCE_DIR="$WORK"
 fi
-for file in uncordex watch-power lib/source.sh VERSION; do
+for file in uncordex watch-power lib/source.sh VERSION helper/uncordex-helper.c helper/Info.plist; do
   [ -f "$SOURCE_DIR/$file" ] || fail "the download is incomplete ($file is missing)." "Try again in a minute."
 done
 /bin/bash -n "$SOURCE_DIR/uncordex" "$SOURCE_DIR/watch-power" "$SOURCE_DIR/lib/source.sh" || fail "the downloaded files are damaged."
@@ -61,6 +61,36 @@ place 755 "$SOURCE_DIR/watch-power" "$APP_DIR/watch-power"
 place 644 "$SOURCE_DIR/lib/source.sh" "$APP_DIR/lib/source.sh"
 place 644 "$SOURCE_DIR/VERSION" "$APP_DIR/VERSION"
 /bin/ln -sfn "$APP_DIR/uncordex" "$BIN_DIR/uncordex"
+
+# Uncordex.app is a tiny helper that holds Uncordex's Bluetooth permission, so
+# macOS asks about "Uncordex" instead of stopping blueutil inside a terminal.
+build_helper() {
+  local app stage hash_now hash_old clang
+  app="$APP_DIR/Uncordex.app"
+  hash_now="$(/bin/cat "$SOURCE_DIR/helper/uncordex-helper.c" "$SOURCE_DIR/helper/Info.plist" | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}')"
+  hash_old="$(/bin/cat "$app/Contents/Resources/source.sha256" 2>/dev/null || true)"
+  # Rebuilding changes the signature and macOS would ask again, so only rebuild on change.
+  if [ "$hash_now" = "$hash_old" ] && [ -x "$app/Contents/MacOS/uncordex-helper" ]; then return 0; fi
+  clang="$(/usr/bin/xcrun --find clang 2>/dev/null || true)"
+  if [ -z "$clang" ]; then
+    /usr/bin/printf '%s\n' "Could not build Uncordex's Bluetooth helper: Apple's command line tools are missing." \
+      "Install them with: xcode-select --install   then run this installer again." >&2
+    return 1
+  fi
+  stage="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/uncordex-helper.XXXXXX")/Uncordex.app"
+  /bin/mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
+  "$clang" -O2 -mmacosx-version-min=13.0 -arch arm64 -arch x86_64 -o "$stage/Contents/MacOS/uncordex-helper" "$SOURCE_DIR/helper/uncordex-helper.c" 2>/dev/null ||
+    "$clang" -O2 -mmacosx-version-min=13.0 -o "$stage/Contents/MacOS/uncordex-helper" "$SOURCE_DIR/helper/uncordex-helper.c" || return 1
+  /bin/cp "$SOURCE_DIR/helper/Info.plist" "$stage/Contents/Info.plist"
+  /usr/bin/printf '%s\n' "$hash_now" >"$stage/Contents/Resources/source.sha256"
+  /usr/bin/codesign --force --sign - "$stage" >/dev/null 2>&1 || return 1
+  /bin/rm -rf "$app"
+  /bin/mv "$stage" "$app"
+  /bin/rmdir "$(/usr/bin/dirname "$stage")" 2>/dev/null || true
+}
+if [ "${UNCORDEX_BUILD_HELPER:-1}" = 1 ]; then
+  build_helper || /usr/bin/printf '%s\n' "Warning: without the helper, macOS may refuse Bluetooth access from a terminal." >&2
+fi
 
 if ! [ -x /opt/homebrew/bin/blueutil ] && ! [ -x /usr/local/bin/blueutil ] && ! command -v blueutil >/dev/null 2>&1; then
   BREW="${UNCORDEX_BREW:-$(command -v brew 2>/dev/null || true)}"

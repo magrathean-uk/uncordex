@@ -2,6 +2,10 @@
 
 Entries describe repository development. Consult the matching tag before treating an entry as a release.
 
+## 2.0.1 (2026-11-18)
+
+- Bluetooth access now belongs to Uncordex rather than the terminal app. Terminal apps such as Terminal and Warp declare no Bluetooth use, so macOS stopped `blueutil` without asking. The installer now builds a tiny helper, `Uncordex.app`, that runs `blueutil` and the watcher; macOS asks once whether Uncordex may use Bluetooth, and setup opens the Settings page and waits if access was refused.
+
 ## 2.0.0 (2026-11-18)
 
 - Removed the GUI app and the macOS package.

@@ -80,9 +80,9 @@ uncordex uninstall --purge                       # removes everything
 
 - macOS 13 or newer, on Apple Silicon or Intel.
 - A Bluetooth speaker already paired with the Mac.
-- Homebrew, for `blueutil`. `install.sh` installs `blueutil` automatically.
+- Homebrew, for `blueutil`. `install.sh` installs `blueutil` automatically and builds Uncordex's small Bluetooth helper with Apple's command line tools, which Homebrew already needs.
 
-The first time, macOS may ask to allow Bluetooth access for your terminal app. If it was blocked, allow it in System Settings > Privacy & Security > Bluetooth.
+The first time you run `uncordex setup`, macOS asks whether Uncordex may use Bluetooth: click Allow. If you clicked Don't Allow, setup opens System Settings > Privacy & Security > Bluetooth and carries on by itself once you turn Uncordex on there.
 
 ## Documentation
 

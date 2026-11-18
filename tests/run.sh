@@ -510,6 +510,10 @@ run_installer() {
 }
 
 make_fake_install_tools
+# Never reach real Bluetooth or the real permission prompt from tests.
+UNCORDEX_DIRECT_BLUETOOTH=1
+UNCORDEX_BUILD_HELPER=0
+export UNCORDEX_DIRECT_BLUETOOTH UNCORDEX_BUILD_HELPER
 
 help_output="$("$ROOT_DIR/uncordex" help 2>&1)"
 assert_contains "uncordex setup" "$help_output" "help names the setup command"
@@ -729,6 +733,20 @@ assert_eq "0" "$start_status" "start succeeds after stop"
 assert_eq "2" "$(/usr/bin/grep -c '^bootstrap ' "$TEST_ROOT/success/launch.trace")" "start loads the LaunchAgent again"
 not_setup_start_output="$(run_cli start-missing start 2>&1)"
 assert_contains "uncordex setup" "$not_setup_start_output" "start without setup points to setup"
+
+helper_base="$TEST_ROOT/helper-agent"
+/bin/mkdir -p "$helper_base/app/Uncordex.app/Contents/MacOS"
+# A stand-in for macOS 'open' and the helper: run the command and record its result.
+# shellcheck disable=SC2016
+/usr/bin/printf '%s\n' '#!/bin/bash' 'prefix="$2"; shift 2; "$@" >"$prefix.out" 2>"$prefix.err"; echo $? >"$prefix.status"' >"$helper_base/app/Uncordex.app/Contents/MacOS/uncordex-helper"
+# shellcheck disable=SC2016
+/usr/bin/printf '%s\n' '#!/bin/bash' 'echo "$*" >>"$UNCORDEX_LAUNCH_TRACE.open"' 'app="$4"; shift 5; exec "$app/Contents/MacOS/uncordex-helper" "$@"' >"$TEST_ROOT/fake-open"
+/bin/chmod 755 "$helper_base/app/Uncordex.app/Contents/MacOS/uncordex-helper" "$TEST_ROOT/fake-open"
+helper_agent_status="$(UNCORDEX_OPEN="$TEST_ROOT/fake-open" UNCORDEX_DIRECT_BLUETOOTH=0 run_installer helper-agent AA-BB-CC-DD-EE-FF --any-power --yes </dev/null >/dev/null 2>&1; echo $?)"
+assert_eq "0" "$helper_agent_status" "setup succeeds with the Bluetooth helper present"
+assert_eq "$helper_base/app/Uncordex.app/Contents/MacOS/uncordex-helper" "$(/usr/bin/plutil -extract ProgramArguments.0 raw -n "$helper_base/LaunchAgents/service.plist")" "the watcher runs inside Uncordex.app so it uses Uncordex's Bluetooth access"
+assert_contains "--paired" "$(/bin/cat "$helper_base/launch.trace.open" 2>/dev/null)" "Bluetooth queries go through Uncordex.app"
+assert_eq "$helper_base/app/watch-power" "$(/usr/bin/plutil -extract ProgramArguments.2 raw -n "$helper_base/LaunchAgents/service.plist")" "the helper runs the installed watcher"
 
 # Default application directory: XDG_DATA_HOME first, then $HOME/.local/share (an empty XDG_DATA_HOME counts as not set).
 # HOME is a test directory here, and XDG_DATA_HOME is only ever assigned, never unset.

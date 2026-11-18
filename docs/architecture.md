@@ -9,6 +9,7 @@ Uncordex is one command-line tool around one watcher. The `uncordex` command han
 | `uncordex` | The CLI: setup, status, start, stop, restart, logs, device and source listing, uninstall. Validates input, writes configuration, stages service files and manages the canonical LaunchAgent. |
 | `install.sh` | One-line installer: copies files to the data directory and links the command. Does not perform setup. |
 | `watch-power` | Owns connection permission, samples state, schedules bounded retries, persists runtime state, and provides text status. |
+| `helper/` | Source for `Uncordex.app`, a tiny ad hoc signed helper that declares Bluetooth use. `install.sh` builds it. The CLI runs `blueutil` inside it through `open`, and the LaunchAgent runs the watcher inside it, so macOS attributes Bluetooth access to Uncordex rather than the terminal app. |
 | `lib/source.sh` | Reads hardware snapshots, offers unique candidates, and classifies fresh source presence as `match`, `absent`, or `unknown`. |
 | `tests/run.sh` | Exercises watcher and CLI decisions with substituted hardware, Bluetooth, clock, and LaunchAgent boundaries. |
 

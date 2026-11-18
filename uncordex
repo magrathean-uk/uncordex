@@ -26,8 +26,13 @@ CONFIG_FILE="$CONFIG_DIR/config"
 LABEL="uk.magrathean.uncordex.watch-power"
 LAUNCHCTL="${UNCORDEX_LAUNCHCTL:-/bin/launchctl}"
 PLUTIL="${UNCORDEX_PLUTIL:-/usr/bin/plutil}"
+OPEN="${UNCORDEX_OPEN:-/usr/bin/open}"
 USER_ID="$(/usr/bin/id -u)"
 SERVICE="gui/$USER_ID/$LABEL"
+HELPER_APP="$APP_DIR/Uncordex.app"
+HELPER_EXEC="$HELPER_APP/Contents/MacOS/uncordex-helper"
+HELPER_ID="uk.magrathean.uncordex"
+BLUETOOTH_SETTINGS="x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth"
 LOG_FILE="$LOG_DIR/uncordex.log"
 ERROR_LOG_FILE="$LOG_DIR/uncordex-error.log"
 
@@ -35,6 +40,8 @@ ERROR_LOG_FILE="$LOG_DIR/uncordex-error.log"
 . "$SCRIPT_DIR/lib/source.sh"
 
 # ---------------------------------------------------------------- helpers
+
+exec 3>&2  # the user's terminal, for notices printed while stderr is captured
 
 say() { /usr/bin/printf '%s\n' "$@"; }
 
@@ -104,13 +111,70 @@ need_blueutil() {
     "Install it with:  brew install blueutil"
 }
 
-BLUETOOTH_HINT="If macOS blocked Bluetooth access, allow your terminal app in System Settings > Privacy & Security > Bluetooth, then try again."
+BLUETOOTH_HINT="Turn on Uncordex in System Settings > Privacy & Security > Bluetooth, then try again."
+
+# macOS grants Bluetooth per app, and terminal apps declare no Bluetooth use,
+# so blueutil runs inside Uncordex.app (launched by macOS as its own app).
+# macOS then asks about "Uncordex" once and remembers the answer.
+use_helper() { [ "${UNCORDEX_DIRECT_BLUETOOTH:-0}" != 1 ] && [ -x "$HELPER_EXEC" ]; }
+
+# bt SECONDS NOTICE BLUEUTIL-ARGS...: run blueutil with Uncordex's Bluetooth access.
+# NOTICE=1 tells the user to click Allow if macOS is showing its prompt.
+bt() {
+  local limit notice work ticks code
+  limit="$1"; notice="$2"; shift 2
+  if ! use_helper; then "$BLUEUTIL_PATH" "$@"; return; fi
+  work="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/uncordex-bt.XXXXXX")" || return 1
+  if ! "$OPEN" -n -g -j "$HELPER_APP" --args --output "$work/r" "$BLUEUTIL_PATH" "$@" >/dev/null 2>&1; then
+    /bin/rm -rf "$work"
+    return 125
+  fi
+  ticks=0
+  while [ ! -e "$work/r.status" ]; do
+    if [ "$notice" = 1 ] && [ "$ticks" -eq 15 ]; then
+      /usr/bin/printf '%s\n' "macOS is asking whether Uncordex may use Bluetooth. Click Allow." >&3
+    fi
+    if [ "$ticks" -ge $((limit * 10)) ]; then /bin/rm -rf "$work"; return 124; fi
+    /bin/sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  /bin/cat "$work/r.out" 2>/dev/null || true
+  /bin/cat "$work/r.err" >&2 2>/dev/null || true
+  code="$(/bin/cat "$work/r.status")"
+  /bin/rm -rf "$work"
+  return "$code"
+}
+
+# Make sure Uncordex may use Bluetooth. The first time, macOS shows its own
+# prompt. If access was refused, open the right Settings page and wait.
+ensure_bluetooth() {
+  local tries
+  if ! use_helper; then
+    [ "${UNCORDEX_DIRECT_BLUETOOTH:-0}" = 1 ] || "$BLUEUTIL_PATH" --power >/dev/null 2>&1 ||
+      fail "Uncordex's Bluetooth helper is missing, so macOS cannot ask for access." \
+        "Install Apple's command line tools with 'xcode-select --install', then reinstall:" \
+        "curl -fsSL https://raw.githubusercontent.com/magrathean-uk/uncordex/main/install.sh | bash"
+    return 0
+  fi
+  if bt 120 1 --power >/dev/null 2>&1; then return 0; fi
+  is_interactive || fail "Uncordex does not have Bluetooth access yet." "$BLUETOOTH_HINT"
+  say "Uncordex needs Bluetooth access. Opening System Settings > Privacy & Security > Bluetooth:" \
+    "turn on Uncordex there. Waiting for it (press Ctrl-C to stop)..."
+  "$OPEN" "$BLUETOOTH_SETTINGS" >/dev/null 2>&1 || true
+  tries=0
+  while [ "$tries" -lt 100 ]; do
+    /bin/sleep 3
+    if bt 15 0 --power >/dev/null 2>&1; then say "Bluetooth access is on. Carrying on." ""; return 0; fi
+    tries=$((tries + 1))
+  done
+  fail "Uncordex still has no Bluetooth access." "$BLUETOOTH_HINT"
+}
 
 DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=()
 read_paired() {
   local output line addr name state
   DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=()
-  output="$("$BLUEUTIL_PATH" --paired 2>&1)" || return 1
+  output="$(bt 30 0 --paired)" || return 1
   while IFS= read -r line; do
     case "$line" in address:*) ;; *) continue ;; esac
     addr="${line#address: }"; addr="${addr%%,*}"
@@ -236,6 +300,7 @@ cmd_devices() {
   load_saved_config
   BLUEUTIL_PATH="$(find_blueutil || true)"
   need_blueutil
+  ensure_bluetooth
   read_paired || fail "could not read paired Bluetooth devices." "$BLUETOOTH_HINT"
   if [ "${#DEV_ADDRS[@]}" -eq 0 ]; then
     say "No paired Bluetooth devices found." "Pair your speaker in System Settings > Bluetooth first."
@@ -412,6 +477,7 @@ cmd_setup() {
   load_saved_config
   BLUEUTIL_PATH="$(find_blueutil || true)"
   need_blueutil
+  if [ "$dry_run" -eq 0 ] || is_interactive; then ensure_bluetooth; fi
 
   # Speaker
   case "$requested_speaker" in
@@ -468,7 +534,16 @@ cmd_setup() {
   "$PLUTIL" -create xml1 "$stage_plist"
   "$PLUTIL" -insert Label -string "$LABEL" "$stage_plist"
   "$PLUTIL" -insert ProgramArguments -array "$stage_plist"
-  "$PLUTIL" -insert ProgramArguments.0 -string "$APP_DIR/watch-power" "$stage_plist"
+  if use_helper; then
+    # The watcher runs inside Uncordex.app so it uses Uncordex's Bluetooth access.
+    "$PLUTIL" -insert ProgramArguments.0 -string "$HELPER_EXEC" "$stage_plist"
+    "$PLUTIL" -insert ProgramArguments.1 -string /bin/bash "$stage_plist"
+    "$PLUTIL" -insert ProgramArguments.2 -string "$APP_DIR/watch-power" "$stage_plist"
+    "$PLUTIL" -insert AssociatedBundleIdentifiers -array "$stage_plist"
+    "$PLUTIL" -insert AssociatedBundleIdentifiers.0 -string "$HELPER_ID" "$stage_plist"
+  else
+    "$PLUTIL" -insert ProgramArguments.0 -string "$APP_DIR/watch-power" "$stage_plist"
+  fi
   "$PLUTIL" -insert RunAtLoad -bool true "$stage_plist"
   "$PLUTIL" -insert KeepAlive -bool true "$stage_plist"
   "$PLUTIL" -insert StandardOutPath -string "$LOG_FILE" "$stage_plist"
@@ -573,7 +648,7 @@ cmd_status() {
   BLUEUTIL_PATH="$(find_blueutil || true)"
   connected="state unknown"
   if [ -n "$BLUEUTIL_PATH" ]; then
-    case "$("$BLUEUTIL_PATH" --is-connected "$SAVED_MAC" 2>/dev/null || true)" in
+    case "$(bt 15 0 --is-connected "$SAVED_MAC" 2>/dev/null || true)" in
       1) connected=connected ;;
       0) connected="not connected" ;;
     esac
@@ -660,6 +735,7 @@ cmd_uninstall() {
   "$LAUNCHCTL" enable "$SERVICE" >/dev/null 2>&1 || true
   /bin/rm -f "$PLIST"
   for file in uncordex watch-power lib/source.sh VERSION; do /bin/rm -f "$APP_DIR/$file"; done
+  if [ -x "$HELPER_EXEC" ]; then /bin/rm -rf "$HELPER_APP"; fi
   /bin/rmdir "$APP_DIR/lib" "$APP_DIR" 2>/dev/null || true
   if [ -L "$BIN_DIR/uncordex" ]; then
     link_target="$(/usr/bin/readlink "$BIN_DIR/uncordex")"
@@ -669,6 +745,7 @@ cmd_uninstall() {
     /bin/rm -f "$CONFIG_FILE" "$STATE_DIR/runtime-state" "$LOG_FILE" "$ERROR_LOG_FILE"
     /bin/rm -rf "$STATE_DIR/install-backups"
     /bin/rmdir "$CONFIG_DIR" "$STATE_DIR" 2>/dev/null || true
+    [ "${UNCORDEX_DIRECT_BLUETOOTH:-0}" = 1 ] || /usr/bin/tccutil reset BluetoothAlways "$HELPER_ID" >/dev/null 2>&1 || true
     say "Uncordex is removed, including its settings and logs."
   else
     say "Uncordex is removed. Your settings were kept, so a reinstall picks up where you left off:" \
