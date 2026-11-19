@@ -27,6 +27,7 @@ LABEL="uk.magrathean.uncordex.watch-power"
 LAUNCHCTL="${UNCORDEX_LAUNCHCTL:-/bin/launchctl}"
 PLUTIL="${UNCORDEX_PLUTIL:-/usr/bin/plutil}"
 OPEN="${UNCORDEX_OPEN:-/usr/bin/open}"
+SYSTEM_PROFILER="${UNCORDEX_SYSTEM_PROFILER:-/usr/sbin/system_profiler}"
 USER_ID="$(/usr/bin/id -u)"
 SERVICE="gui/$USER_ID/$LABEL"
 HELPER_APP="$APP_DIR/Uncordex.app"
@@ -131,8 +132,8 @@ bt() {
   fi
   ticks=0
   while [ ! -e "$work/r.status" ]; do
-    if [ "$notice" = 1 ] && [ "$ticks" -eq 15 ]; then
-      /usr/bin/printf '%s\n' "macOS is asking whether Uncordex may use Bluetooth. Click Allow." >&3
+    if [ "$notice" = 1 ] && [ "$ticks" -eq 50 ]; then
+      /usr/bin/printf '%s\n' "If macOS asks whether Uncordex may use Bluetooth, click Allow." >&3
     fi
     if [ "$ticks" -ge $((limit * 10)) ]; then /bin/rm -rf "$work"; return 124; fi
     /bin/sleep 0.1
@@ -170,25 +171,69 @@ ensure_bluetooth() {
   fail "Uncordex still has no Bluetooth access." "$BLUETOOTH_HINT"
 }
 
-DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=()
+DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=(); DEV_AUDIO_COUNT=0
+# Addresses of paired audio outputs (speakers, headphones), one per line.
+# system_profiler needs no Bluetooth permission. Prints nothing if it fails.
+audio_addresses() {
+  "$SYSTEM_PROFILER" SPBluetoothDataType 2>/dev/null | /usr/bin/awk '
+    /^ *Address: / { addr = $2 }
+    /^ *Minor Type: / {
+      type = $0; sub(/^ *Minor Type: /, "", type)
+      if (addr != "" && type ~ /Speaker|Headphone|Headset|Audio|Loudspeaker|HiFi|Hi-Fi/) print addr
+    }' | /usr/bin/tr 'A-F:' 'a-f-'
+}
+
+# Fills DEV_* with each paired device once, audio outputs first.
 read_paired() {
-  local output line addr name state
-  DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=()
+  local output line addr name state index found audio pass
+  local addrs names states
+  addrs=(); names=(); states=()
+  DEV_ADDRS=(); DEV_NAMES=(); DEV_STATES=(); DEV_AUDIO_COUNT=0
   output="$(bt 30 0 --paired)" || return 1
   while IFS= read -r line; do
     case "$line" in address:*) ;; *) continue ;; esac
     addr="${line#address: }"; addr="${addr%%,*}"
     valid_address "$addr" || continue
+    addr="$(normal_address "$addr")"
     name=""
     case "$line" in *'name: "'*) name="${line#*name: \"}"; name="${name%%\"*}" ;; esac
+    name="$(_source_clean_text "$name")"
     state="not connected"
     case "$line" in *", not connected"*) ;; *", connected"*) state=connected ;; esac
-    DEV_ADDRS[${#DEV_ADDRS[@]}]="$(normal_address "$addr")"
-    DEV_NAMES[${#DEV_NAMES[@]}]="$(_source_clean_text "$name")"
-    DEV_STATES[${#DEV_STATES[@]}]="$state"
+    # macOS can list one device twice; keep one row per address.
+    found=""; index=0
+    while [ "$index" -lt "${#addrs[@]}" ]; do
+      if [ "${addrs[$index]}" = "$addr" ]; then found="$index"; break; fi
+      index=$((index + 1))
+    done
+    if [ -n "$found" ]; then
+      [ -n "${names[$found]}" ] || names[$found]="$name"
+      [ "$state" != connected ] || states[$found]=connected
+      continue
+    fi
+    addrs[${#addrs[@]}]="$addr"; names[${#names[@]}]="$name"; states[${#states[@]}]="$state"
   done <<EOF
 $output
 EOF
+  audio="$(audio_addresses)"
+  for pass in audio other; do
+    index=0
+    while [ "$index" -lt "${#addrs[@]}" ]; do
+      case "
+$audio
+" in
+        *"
+${addrs[$index]}
+"*) [ "$pass" = audio ] || { index=$((index + 1)); continue; } ;;
+        *) [ "$pass" = other ] || { index=$((index + 1)); continue; } ;;
+      esac
+      DEV_ADDRS[${#DEV_ADDRS[@]}]="${addrs[$index]}"
+      DEV_NAMES[${#DEV_NAMES[@]}]="${names[$index]}"
+      DEV_STATES[${#DEV_STATES[@]}]="${states[$index]}"
+      index=$((index + 1))
+    done
+    [ "$pass" != audio ] || DEV_AUDIO_COUNT="${#DEV_ADDRS[@]}"
+  done
   return 0
 }
 
@@ -206,6 +251,9 @@ print_paired() {
   local index marker
   index=0
   while [ "$index" -lt "${#DEV_ADDRS[@]}" ]; do
+    if [ "$index" -eq "$DEV_AUDIO_COUNT" ] && [ "$DEV_AUDIO_COUNT" -gt 0 ]; then
+      /usr/bin/printf '%s\n' "   Other devices (not speakers):"
+    fi
     marker=" "
     [ "${DEV_ADDRS[$index]}" != "$(normal_address "$SAVED_MAC")" ] || marker="*"
     /usr/bin/printf ' %s %2s) %-28s %s  (%s)\n' "$marker" "$((index + 1))" "${DEV_NAMES[$index]:-Unnamed device}" "${DEV_ADDRS[$index]}" "${DEV_STATES[$index]}"

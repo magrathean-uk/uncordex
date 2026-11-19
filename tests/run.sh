@@ -465,7 +465,7 @@ make_fake_install_tools() {
   /usr/bin/printf '%s\n' \
     '#!/bin/bash' \
     'case "${1:-}" in' \
-    '  --paired) printf "%s\\n" "address: aa-bb-cc-dd-ee-ff, not connected, not favourite, paired, name: \"Test Speaker\", recent access date: 2026-01-01" "address: 11-22-33-44-55-66, connected (master, -50 dBm), not favourite, paired, name: \"Test Keyboard\", recent access date: 2026-01-01" ;;' \
+    '  --paired) printf "%s\\n" "address: aa-bb-cc-dd-ee-ff, not connected, not favourite, paired, name: \"Test Speaker\", recent access date: 2026-01-01" "address: 11-22-33-44-55-66, connected (master, -50 dBm), not favourite, paired, name: \"Test Keyboard\", recent access date: 2026-01-01" "address: aa-bb-cc-dd-ee-ff, not connected, not favourite, paired, name: \"Test Speaker\", recent access date: 2026-01-01" ;;' \
     '  --is-connected) printf "0\\n" ;;' \
     'esac' \
     'exit 0' >"$FAKE_BLUEUTIL"
@@ -480,7 +480,9 @@ make_fake_install_tools() {
     'if [ "${1:-}" = bootout ] && [ "${UNCORDEX_FAIL_BOOTOUT:-0}" = 1 ]; then exit 1; fi' \
     'if [ "${1:-}" = bootstrap ] && [ "${UNCORDEX_FAIL_BOOTSTRAP_ONCE:-0}" = 1 ] && [ ! -e "${UNCORDEX_LAUNCH_TRACE}.failed-once" ]; then touch "${UNCORDEX_LAUNCH_TRACE}.failed-once"; exit 1; fi' \
     'exit 0' >"$FAKE_LAUNCHCTL"
-  /bin/chmod 755 "$FAKE_BLUEUTIL" "$FAKE_LAUNCHCTL"
+  FAKE_SYSTEM_PROFILER="$TEST_ROOT/fake-system-profiler"
+  /usr/bin/printf '%s\n' '#!/bin/bash' 'printf "%s\\n" "Bluetooth:" "      Not Connected:" "          Test Speaker:" "              Address: AA:BB:CC:DD:EE:FF" "              Minor Type: Speaker" "          Test Keyboard:" "              Address: 11:22:33:44:55:66" "              Minor Type: Keyboard"' >"$FAKE_SYSTEM_PROFILER"
+  /bin/chmod 755 "$FAKE_BLUEUTIL" "$FAKE_LAUNCHCTL" "$FAKE_SYSTEM_PROFILER"
 }
 
 # run_cli CASE [uncordex arguments...]: run the CLI against isolated paths only.
@@ -498,6 +500,7 @@ run_cli() {
   UNCORDEX_PLIST="$INSTALL_BASE/LaunchAgents/service.plist" \
   UNCORDEX_LOG_DIR="$INSTALL_BASE/logs" \
   UNCORDEX_BLUEUTIL="$FAKE_BLUEUTIL" \
+  UNCORDEX_SYSTEM_PROFILER="${TEST_SYSTEM_PROFILER:-$FAKE_SYSTEM_PROFILER}" \
   UNCORDEX_LAUNCHCTL="$FAKE_LAUNCHCTL" \
   UNCORDEX_LAUNCH_TRACE="$INSTALL_BASE/launch.trace" \
   "${UNCORDEX_CLI:-$ROOT_DIR/uncordex}" "$@"
@@ -545,6 +548,11 @@ assert_contains "Service: not installed" "$status_valid_output" "status reports 
 
 devices_output="$(run_cli devices devices 2>&1)"
 assert_contains " 1) Test Speaker" "$devices_output" "devices lists paired devices by number"
+assert_contains "Other devices (not speakers):" "$devices_output" "devices separates devices that are not speakers"
+assert_contains " 2) Test Keyboard" "$devices_output" "devices lists speakers before other devices"
+assert_eq "1" "$(/usr/bin/printf '%s\n' "$devices_output" | /usr/bin/grep -c 'Test Speaker')" "devices lists a device reported twice only once"
+plain_devices_output="$(TEST_SYSTEM_PROFILER=/usr/bin/false run_cli devices-plain devices 2>&1)"
+assert_contains " 2) Test Keyboard" "$plain_devices_output" "devices still lists everything when device types are unknown"
 
 sources_output="$(run_cli sources sources 2>&1)"
 sources_status=$?

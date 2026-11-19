@@ -2,6 +2,11 @@
 
 Entries describe repository development. Consult the matching tag before treating an entry as a release.
 
+## 2.0.2 (2026-11-19)
+
+- The device list shows each device once, even when macOS reports it twice, and lists speakers and headphones first, with other devices below them.
+- The Bluetooth permission notice appears only after a 5-second wait, so it no longer shows when access is already granted.
+
 ## 2.0.1 (2026-11-18)
 
 - Bluetooth access now belongs to Uncordex rather than the terminal app. Terminal apps such as Terminal and Warp declare no Bluetooth use, so macOS stopped `blueutil` without asking. The installer now builds a tiny helper, `Uncordex.app`, that runs `blueutil` and the watcher; macOS asks once whether Uncordex may use Bluetooth, and setup opens the Settings page and waits if access was refused.
